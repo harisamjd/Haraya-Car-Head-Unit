@@ -112,6 +112,7 @@ class CarCockpitView(
     private val quoteCard: GlassCardView
     private val quoteHeaderTitleTv: TextView
     private val quoteCountTv: TextView
+    private val quoteArabicTv: TextView
     private val quoteBodyTv: TextView
     private val quoteRefTv: TextView
 
@@ -421,12 +422,14 @@ class CarCockpitView(
         prayerCol.addView(prayerStrip, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         prayerCard.addView(prayerCol, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
-        // 2C. Daily Verse & Prayer Card
+        // 2C. Daily Verse & Prayer Card (Auto-updates via AlQuran Cloud API: Arabic + Indonesian)
+        QuoteRepository.loadCachedOrDefault(context)
         quoteCard = GlassCardView(context)
-        quoteCard.setPadding(cardPadH, dp(7f), cardPadH, dp(7f))
+        quoteCard.setPadding(cardPadH, dp(6f), cardPadH, dp(6f))
         quoteCard.setOnClickListener {
-            quoteIdx = (quoteIdx + 1) % QuoteRepository.count()
-            refreshQuoteText()
+            QuoteRepository.fetchNextFromAlQuranApiAsync(context) {
+                refreshQuoteText()
+            }
         }
         val quoteCol = LinearLayout(context).apply {
             orientation = VERTICAL
@@ -444,6 +447,7 @@ class CarCockpitView(
             includeFontPadding = false
         }
         quoteCountTv = TextView(context).apply {
+            text = "Auto • Tap"
             textSize = 8f
             includeFontPadding = false
             gravity = Gravity.END
@@ -454,27 +458,38 @@ class CarCockpitView(
             bottomMargin = dp(2f)
         })
 
+        quoteArabicTv = TextView(context).apply {
+            textSize = 11.5f
+            typeface = Typeface.create("serif", Typeface.BOLD)
+            includeFontPadding = false
+            gravity = Gravity.END
+            maxLines = 2
+            ellipsize = TextUtils.TruncateAt.END
+        }
         quoteBodyTv = TextView(context).apply {
-            textSize = 9f
+            textSize = 8.5f
             includeFontPadding = false
             maxLines = 2
             ellipsize = TextUtils.TruncateAt.END
         }
         quoteRefTv = TextView(context).apply {
-            textSize = 8.5f
+            textSize = 8f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
             includeFontPadding = false
             maxLines = 1
         }
+        quoteCol.addView(quoteArabicTv, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            bottomMargin = dp(2f)
+        })
         quoteCol.addView(quoteBodyTv)
         quoteCol.addView(quoteRefTv, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
             topMargin = dp(2f)
         })
         quoteCard.addView(quoteCol, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
-        leftCol.addView(mapCard, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 0.45f).apply { bottomMargin = dp(6f) })
-        leftCol.addView(prayerCard, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 0.28f).apply { bottomMargin = dp(6f) })
-        leftCol.addView(quoteCard, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 0.27f))
+        leftCol.addView(mapCard, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 0.41f).apply { bottomMargin = dp(6f) })
+        leftCol.addView(prayerCard, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 0.27f).apply { bottomMargin = dp(6f) })
+        leftCol.addView(quoteCard, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 0.32f))
 
         mainColumnsRow.addView(leftCol, LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.29f).apply {
             rightMargin = dp(8f)
@@ -490,6 +505,7 @@ class CarCockpitView(
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(12f), dp(5f), dp(12f), dp(5f))
+            visibility = View.GONE
         }
         val alertTextCol = LinearLayout(context).apply { orientation = VERTICAL }
         alertBannerTitleTv = TextView(context).apply {
@@ -1171,6 +1187,9 @@ class CarCockpitView(
                 prayerSlotTimes[i].setTextColor(palette.textPrimary)
             }
         }
+        QuoteRepository.autoUpdateIfDue(context, intervalMinutes = 5) {
+            refreshQuoteText()
+        }
         refreshQuoteText()
         refreshMediaState()
     }
@@ -1328,33 +1347,20 @@ class CarCockpitView(
             alertBannerTitleTv.setTextColor(if (palette.isDark) 0xFFFCA5A5.toInt() else 0xFFB91C1C.toInt())
             alertBannerSubTv.setTextColor(palette.textPrimary)
             alertBannerCloseTv.visibility = View.GONE
-        } else if (!seatbeltBannerDismissed) {
-            alertBannerBox.visibility = View.VISIBLE
-            alertBannerTitleTv.text = "Fasten Your Seatbelt"
-            alertBannerSubTv.text = "Please fasten your seatbelt for a safe journey"
-            val bannerBg = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                cornerRadius = dp(10f).toFloat()
-                setColor(if (palette.isDark) 0x33F59E0B else 0x22F59E0B)
-                setStroke(dp(1f), 0xFFF59E0B.toInt())
-            }
-            alertBannerBox.background = bannerBg
-            alertBannerTitleTv.setTextColor(if (palette.isDark) 0xFFFCD34D.toInt() else 0xFFB45309.toInt())
-            alertBannerSubTv.setTextColor(palette.textPrimary)
-            alertBannerCloseTv.visibility = View.VISIBLE
-            alertBannerCloseTv.setTextColor(palette.textSecondary)
         } else {
             alertBannerBox.visibility = View.GONE
         }
     }
 
     private fun refreshQuoteText() {
-        val q = QuoteRepository.getQuote(quoteIdx)
-        quoteCountTv.text = "${quoteIdx + 1}/${QuoteRepository.count()} • Tap"
+        val q = QuoteRepository.getCurrentQuote()
+        quoteCountTv.text = "Auto • Tap"
+        quoteArabicTv.text = q.arabic
         quoteBodyTv.text = "\"${q.translation}\""
         quoteRefTv.text = q.reference
         quoteCountTv.setTextColor(palette.textMuted)
-        quoteBodyTv.setTextColor(palette.textPrimary)
+        quoteArabicTv.setTextColor(palette.textPrimary)
+        quoteBodyTv.setTextColor(palette.textSecondary)
         quoteRefTv.setTextColor(palette.accent)
     }
 
@@ -1427,13 +1433,43 @@ class CarCockpitView(
                     dlg.dismiss()
                     adhanPlayerManager.triggerAdhanWithPopup(context, palette, "Fajr", "04:30", isFajr = true)
                 }
+                val travelEnabled = adhanPlayerManager.isStartupTravelPrayerEnabled()
+                val travelToggleRow = HarayaDialog.buildOptionRow(
+                    context = context,
+                    palette = palette,
+                    title = "Startup Travel Prayer Audio (20s Delay)",
+                    subtitle = "Plays travel-pray.m4a 20 seconds after head unit turns on",
+                    badgeText = if (travelEnabled) "Enabled ✓" else "Disabled",
+                    badgePositive = travelEnabled
+                ) {
+                    adhanPlayerManager.setStartupTravelPrayerEnabled(!travelEnabled)
+                    dlg.dismiss()
+                    showAdhanPreviewDialog()
+                }
+                val testTravelRow = HarayaDialog.buildOptionRow(
+                    context = context,
+                    palette = palette,
+                    title = "Play Travel Prayer Audio Now",
+                    subtitle = "Test audio/travel-pray.m4a immediately",
+                    badgeText = "Play Prayer",
+                    badgePositive = false
+                ) {
+                    dlg.dismiss()
+                    adhanPlayerManager.playTravelPrayerNow()
+                }
                 container.addView(toggleRow, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                     bottomMargin = dp(6f)
                 })
                 container.addView(testRegRow, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                     bottomMargin = dp(6f)
                 })
-                container.addView(testFajrRow, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+                container.addView(testFajrRow, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                    bottomMargin = dp(6f)
+                })
+                container.addView(travelToggleRow, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                    bottomMargin = dp(6f)
+                })
+                container.addView(testTravelRow, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             },
             actions = listOf(
                 HarayaDialog.ActionButton("Close", isPrimary = true) { it.dismiss() }

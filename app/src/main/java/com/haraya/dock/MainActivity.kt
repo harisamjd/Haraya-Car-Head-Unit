@@ -364,6 +364,11 @@ class MainActivity : Activity(), LocationListener {
 
         setScreen(AppScreen.HOME)
         handleIncomingDockIntent(intent)
+        adhanPlayerManager.scheduleStartupTravelPrayerIfNeeded()
+        QuoteRepository.loadCachedOrDefault(this)
+        QuoteRepository.autoUpdateIfDue(this, intervalMinutes = 5) {
+            refreshAll()
+        }
         refreshAll()
         applyObdTelemetryToUi(obdConnectionManager.getCurrentTelemetry())
         requestLocationPermissionIfNeeded()
@@ -767,10 +772,9 @@ class MainActivity : Activity(), LocationListener {
             val p = dp(6f)
             setPadding(p, p, p, p)
             setOnClickListener {
-                quoteIndex = (quoteIndex + 1) % QuoteRepository.count()
-                getSharedPreferences("haraya_prefs", Context.MODE_PRIVATE)
-                    .edit().putInt("quote_idx", quoteIndex).apply()
-                refreshQuote()
+                QuoteRepository.fetchNextFromAlQuranApiAsync(this@MainActivity) {
+                    refreshQuote()
+                }
             }
         }
 
@@ -1663,12 +1667,12 @@ class MainActivity : Activity(), LocationListener {
     }
 
     private fun refreshQuote() {
-        val quote = QuoteRepository.getQuote(quoteIndex)
+        val quote = QuoteRepository.getCurrentQuote()
         quoteArabicTv.text = quote.arabic
         quoteArabicTv.setTextColor(palette.textPrimary)
         quoteTranslationTv.text = "\"${quote.translation}\" (${quote.reference})"
         quoteTranslationTv.setTextColor(palette.textSecondary)
-        quoteHintTv.text = "Tap verse for next quote (${quoteIndex + 1}/${QuoteRepository.count()})"
+        quoteHintTv.text = "Auto-updated via AlQuran Cloud • Tap for next verse"
         quoteHintTv.setTextColor(palette.textMuted)
     }
 
@@ -2018,13 +2022,43 @@ class MainActivity : Activity(), LocationListener {
                     dlg.dismiss()
                     adhanPlayerManager.triggerAdhanWithPopup(this, palette, "Fajr", "04:30", isFajr = true)
                 }
+                val travelEnabled = adhanPlayerManager.isStartupTravelPrayerEnabled()
+                val travelToggleRow = HarayaDialog.buildOptionRow(
+                    context = this,
+                    palette = palette,
+                    title = "Startup Travel Prayer Audio (20s Delay)",
+                    subtitle = "Automatically plays travel-pray.m4a 20s after head unit starts",
+                    badgeText = if (travelEnabled) "Enabled ✓" else "Disabled",
+                    badgePositive = travelEnabled
+                ) {
+                    adhanPlayerManager.setStartupTravelPrayerEnabled(!travelEnabled)
+                    dlg.dismiss()
+                    showAdhanSettingsSubModal()
+                }
+                val testTravelRow = HarayaDialog.buildOptionRow(
+                    context = this,
+                    palette = palette,
+                    title = "Preview Startup Travel Prayer Audio",
+                    subtitle = "Play travel-pray.m4a immediately",
+                    badgeText = "Play Prayer",
+                    badgePositive = false
+                ) {
+                    dlg.dismiss()
+                    adhanPlayerManager.playTravelPrayerNow()
+                }
                 container.addView(toggleRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                     bottomMargin = dp(6f)
                 })
                 container.addView(testRegRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                     bottomMargin = dp(6f)
                 })
-                container.addView(testFajrRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+                container.addView(testFajrRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                    bottomMargin = dp(6f)
+                })
+                container.addView(travelToggleRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                    bottomMargin = dp(6f)
+                })
+                container.addView(testTravelRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             },
             actions = listOf(
                 HarayaDialog.ActionButton("Close", isPrimary = true) { it.dismiss() }
