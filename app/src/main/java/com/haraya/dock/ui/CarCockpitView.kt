@@ -399,7 +399,7 @@ class CarCockpitView(
             })
         }
         prayerCol.addView(prayerStrip, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        prayerCard.addView(prayerCol, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        prayerCard.addView(prayerCol, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
         // 2C. Daily Verse & Prayer Card (Auto-updates via AlQuran Cloud API: Arabic + Indonesian)
         QuoteRepository.loadCachedOrDefault(context)
@@ -464,11 +464,11 @@ class CarCockpitView(
         quoteCol.addView(quoteRefTv, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
             topMargin = dp(2f)
         })
-        quoteCard.addView(quoteCol, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        quoteCard.addView(quoteCol, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
-        leftCol.addView(mapCard, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 0.41f).apply { bottomMargin = dp(6f) })
-        leftCol.addView(prayerCard, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 0.27f).apply { bottomMargin = dp(6f) })
-        leftCol.addView(quoteCard, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 0.32f))
+        leftCol.addView(mapCard, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f).apply { bottomMargin = dp(6f) })
+        leftCol.addView(prayerCard, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(6f) })
+        leftCol.addView(quoteCard, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
         mainColumnsRow.addView(leftCol, LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.29f).apply {
             rightMargin = dp(8f)
@@ -644,6 +644,43 @@ class CarCockpitView(
                 bottomMargin = dp(2f)
             }
         )
+
+        speedArcView.onGeometryChanged = { cx, cy, radius, rpmRadius, extraY ->
+            post {
+                val carH = (rpmRadius * 0.90f).toInt().coerceIn(dp(95f), dp(175f))
+                val carTop = (cy - rpmRadius * 0.12f).toInt()
+
+                (carImageView.layoutParams as? FrameLayout.LayoutParams)?.let { lp ->
+                    lp.width = ViewGroup.LayoutParams.MATCH_PARENT
+                    lp.height = carH
+                    lp.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                    lp.topMargin = carTop
+                    lp.leftMargin = dp(24f)
+                    lp.rightMargin = dp(24f)
+                    lp.bottomMargin = 0
+                    carImageView.layoutParams = lp
+                }
+
+                (carBottomStatusBar.layoutParams as? FrameLayout.LayoutParams)?.let { lp ->
+                    lp.width = ViewGroup.LayoutParams.MATCH_PARENT
+                    lp.height = ViewGroup.LayoutParams.WRAP_CONTENT
+                    lp.gravity = Gravity.TOP
+                    lp.topMargin = carTop + carH + dp(6f)
+                    lp.bottomMargin = 0
+                    carBottomStatusBar.layoutParams = lp
+                }
+
+                val cornerTop = (extraY + dp(4f)).toInt()
+                (leftCornerControls.layoutParams as? FrameLayout.LayoutParams)?.let { lp ->
+                    lp.topMargin = cornerTop
+                    leftCornerControls.layoutParams = lp
+                }
+                (rightCornerControls.layoutParams as? FrameLayout.LayoutParams)?.let { lp ->
+                    lp.topMargin = cornerTop
+                    rightCornerControls.layoutParams = lp
+                }
+            }
+        }
 
         centerCol.addView(centerStageFrame, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f).apply {
             bottomMargin = dp(6f)
@@ -964,11 +1001,11 @@ class CarCockpitView(
         })
         wBodyRow.addView(weatherDescTv, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         wCol.addView(wBodyRow)
-        weatherCard.addView(wCol, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        weatherCard.addView(wCol, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
-        rightCol.addView(tripHistoryCard, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 0.30f).apply { bottomMargin = dp(6f) })
-        rightCol.addView(serviceCard, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 0.46f).apply { bottomMargin = dp(6f) })
-        rightCol.addView(weatherCard, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 0.24f))
+        rightCol.addView(tripHistoryCard, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 0.44f).apply { bottomMargin = dp(6f) })
+        rightCol.addView(serviceCard, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 0.56f).apply { bottomMargin = dp(6f) })
+        rightCol.addView(weatherCard, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
         mainColumnsRow.addView(rightCol, LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.29f))
 

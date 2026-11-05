@@ -74,6 +74,8 @@ class CenterSpeedArcView(context: Context) : View(context) {
     private val innerArcRect = RectF()
     private val innerBlockRect = RectF()
 
+    var onGeometryChanged: ((cx: Float, cy: Float, radius: Float, rpmRadius: Float, extraY: Float) -> Unit)? = null
+
     fun setSpeed(kmh: Int) {
         val clamped = kmh.coerceIn(0, 200)
         if (targetSpeedKmh != clamped) {
@@ -148,6 +150,20 @@ class CenterSpeedArcView(context: Context) : View(context) {
         invalidate()
     }
 
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        if (w > 0 && h > 0) {
+            val radius = min(w * 0.46f, h * 0.52f)
+            val speedStrokeW = (radius * 0.068f).coerceIn(6.5f, 15f)
+            val clusterH = radius * 1.55f
+            val extraY = ((h - clusterH) * 0.32f).coerceAtLeast(0f)
+            val cx = w.toFloat() / 2f
+            val cy = extraY + radius + speedStrokeW * 1.25f
+            val rpmRadius = radius * 0.71f
+            onGeometryChanged?.invoke(cx, cy, radius, rpmRadius, extraY)
+        }
+    }
+
     override fun onDraw(canvas: Canvas) {
         val w = width.toFloat()
         val h = height.toFloat()
@@ -157,10 +173,13 @@ class CenterSpeedArcView(context: Context) : View(context) {
         val startAngle = 170f
         val totalSweep = 200f
 
-        val radius = min(w * 0.43f, h * 0.79f)
+        val radius = min(w * 0.46f, h * 0.52f)
         val speedStrokeW = (radius * 0.068f).coerceIn(6.5f, 15f)
+        val clusterH = radius * 1.55f
+        val extraY = ((h - clusterH) * 0.32f).coerceAtLeast(0f)
+
         val cx = w / 2f
-        val cy = radius + speedStrokeW * 1.85f
+        val cy = extraY + radius + speedStrokeW * 1.25f
 
         val zone1Color = if (palette.isDark) 0x382DD4BF else 0x4838BDF8
         val zone2Color = if (palette.isDark) 0x38F59E0B else 0x48FBBF24
