@@ -909,7 +909,6 @@ class CarCockpitView(
             }
         }
         refreshQuoteText()
-        NotificationCollectorService.pollNow(context)
         refreshMediaState()
     }
 
@@ -978,7 +977,6 @@ class CarCockpitView(
                 serviceItemTitles[i].setTextColor(palette.textPrimary)
                 serviceItemStatuses[i].setTextColor(if (palette.isDark) 0xFF4ADE80.toInt() else 0xFF15803D.toInt())
             }
-            GlassTheme.makePressable(context, serviceItemBoxes[i], palette, 10f)
         }
 
         refreshAlertBanner()

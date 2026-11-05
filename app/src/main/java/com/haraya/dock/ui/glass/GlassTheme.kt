@@ -36,58 +36,58 @@ data class GlassPalette(
 
 object GlassTheme {
 
-    // Mode Terang: Kain Sutra Krem Keemasan + Kaca Putih Hangat
+    // Mode Terang: Clean Alabaster Matte + Kartu Putih Tajam
     val Light = GlassPalette(
         isDark = false,
-        windowBg = 0xFFE9DCCB.toInt(),
-        textPrimary = 0xFF16161A.toInt(),
-        textSecondary = 0xFF5E5850.toInt(),
-        textMuted = 0xFF8C8479.toInt(),
-        accent = 0xFF1A6DEB.toInt(),
-        accentLight = 0xFF4C93F7.toInt(),
-        track = 0x24000000,
-        line = 0x1F000000,
-        stroke = 0xB8FFFFFF.toInt(),
-        ripple = 0x26000000,
-        cardTop = 0x99FFFFFF.toInt(),
-        cardBottom = 0x6BFFFFFF,
-        innerTop = 0xB8FFFFFF.toInt(),
-        innerBottom = 0x94FFFFFF.toInt(),
-        overTop = 0xF5FFFFFF.toInt(),
-        overBottom = 0xEBFFFFFF.toInt(),
-        sidebarTop = 0x99FFFFFF.toInt(),
-        sidebarBottom = 0x73FFFFFF,
-        selectTop = 0xF2EEF5FE.toInt(),
-        selectBottom = 0xE6DCE9FC.toInt(),
-        selectFg = 0xFF1A6DEB.toInt(),
-        chip = 0x7AFFFFFF
+        windowBg = 0xFFF1F4F9.toInt(),
+        textPrimary = 0xFF111827.toInt(),
+        textSecondary = 0xFF4B5563.toInt(),
+        textMuted = 0xFF6B7280.toInt(),
+        accent = 0xFF2563EB.toInt(),
+        accentLight = 0xFF3B82F6.toInt(),
+        track = 0x20000000,
+        line = 0x18000000,
+        stroke = 0xFFE2E8F0.toInt(),
+        ripple = 0x1F000000,
+        cardTop = 0xFFFFFFFF.toInt(),
+        cardBottom = 0xFFF8FAFC.toInt(),
+        innerTop = 0xFFF1F5F9.toInt(),
+        innerBottom = 0xFFEFF4F8.toInt(),
+        overTop = 0xFAFFFFFF.toInt(),
+        overBottom = 0xF5F8FAFC.toInt(),
+        sidebarTop = 0xFFFFFFFF.toInt(),
+        sidebarBottom = 0xFFF8FAFC.toInt(),
+        selectTop = 0xFFDBEAFE.toInt(),
+        selectBottom = 0xFFBFDBFE.toInt(),
+        selectFg = 0xFF1D4ED8.toInt(),
+        chip = 0xFFE2E8F0.toInt()
     )
 
-    // Mode Gelap: Lipatan Sutra Biru-Obsidian + Kaca Malam Periwinkle
+    // Mode Gelap: Carbon Obsidian Matte + Kartu Malam Presisi
     val Dark = GlassPalette(
         isDark = true,
-        windowBg = 0xFF12131F.toInt(),
-        textPrimary = 0xFFF1F0F8.toInt(),
-        textSecondary = 0xFFB3B2CA.toInt(),
-        textMuted = 0xFF7F7E99.toInt(),
-        accent = 0xFF7076F0.toInt(),
-        accentLight = 0xFF9EA3FF.toInt(),
-        track = 0x33FFFFFF,
-        line = 0x24FFFFFF,
-        stroke = 0x33FFFFFF,
-        ripple = 0x33FFFFFF,
-        cardTop = 0xA623243A.toInt(),
-        cardBottom = 0x9115162A.toInt(),
-        innerTop = 0x24FFFFFF,
-        innerBottom = 0x12FFFFFF,
-        overTop = 0xEB23253C.toInt(),
-        overBottom = 0xE01A1C30.toInt(),
-        sidebarTop = 0xB8141524.toInt(),
-        sidebarBottom = 0x9410111E.toInt(),
-        selectTop = 0x597076F0,
-        selectBottom = 0x387076F0,
-        selectFg = 0xFFD8DAFF.toInt(),
-        chip = 0x22FFFFFF
+        windowBg = 0xFF0D0F17.toInt(),
+        textPrimary = 0xFFF3F4F8.toInt(),
+        textSecondary = 0xFF9CA3AF.toInt(),
+        textMuted = 0xFF6B7280.toInt(),
+        accent = 0xFF6366F1.toInt(),
+        accentLight = 0xFF818CF8.toInt(),
+        track = 0x2EFFFFFF,
+        line = 0x1FFFFFFF,
+        stroke = 0xFF232738.toInt(),
+        ripple = 0x2EFFFFFF,
+        cardTop = 0xFF161925.toInt(),
+        cardBottom = 0xFF131620.toInt(),
+        innerTop = 0xFF1E2231.toInt(),
+        innerBottom = 0xFF1A1E2C.toInt(),
+        overTop = 0xF21A1D2B.toInt(),
+        overBottom = 0xEB151824.toInt(),
+        sidebarTop = 0xFF161925.toInt(),
+        sidebarBottom = 0xFF12151F.toInt(),
+        selectTop = 0xFF282C4E.toInt(),
+        selectBottom = 0xFF212442.toInt(),
+        selectFg = 0xFFC7D2FE.toInt(),
+        chip = 0xFF232738.toInt()
     )
 
     fun dp(context: Context, value: Float): Int =
@@ -99,32 +99,32 @@ object GlassTheme {
     fun glassPanel(context: Context, palette: GlassPalette, radiusDp: Float, topColor: Int, bottomColor: Int): GradientDrawable {
         return GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(topColor, bottomColor)).apply {
             cornerRadius = dpf(context, radiusDp)
-            setStroke(dp(context, 1.4f), palette.stroke)
+            setStroke(dp(context, 1f), palette.stroke)
         }
     }
 
     fun cardDrawable(context: Context, palette: GlassPalette): GradientDrawable =
-        glassPanel(context, palette, 26f, palette.cardTop, palette.cardBottom)
+        glassPanel(context, palette, 16f, palette.cardTop, palette.cardBottom)
 
     fun sidebarDrawable(context: Context, palette: GlassPalette): GradientDrawable =
-        glassPanel(context, palette, 24f, palette.sidebarTop, palette.sidebarBottom)
+        glassPanel(context, palette, 18f, palette.sidebarTop, palette.sidebarBottom)
 
-    fun innerDrawable(context: Context, palette: GlassPalette, radiusDp: Float = 18f): GradientDrawable =
+    fun innerDrawable(context: Context, palette: GlassPalette, radiusDp: Float = 12f): GradientDrawable =
         glassPanel(context, palette, radiusDp, palette.innerTop, palette.innerBottom)
 
-    fun overDrawable(context: Context, palette: GlassPalette, radiusDp: Float = 16f): GradientDrawable =
+    fun overDrawable(context: Context, palette: GlassPalette, radiusDp: Float = 12f): GradientDrawable =
         glassPanel(context, palette, radiusDp, palette.overTop, palette.overBottom)
 
-    fun selectDrawable(context: Context, palette: GlassPalette, radiusDp: Float = 16f): GradientDrawable =
+    fun selectDrawable(context: Context, palette: GlassPalette, radiusDp: Float = 12f): GradientDrawable =
         glassPanel(context, palette, radiusDp, palette.selectTop, palette.selectBottom)
 
-    fun accentButtonDrawable(context: Context, palette: GlassPalette, radiusDp: Float = 14f): GradientDrawable {
+    fun accentButtonDrawable(context: Context, palette: GlassPalette, radiusDp: Float = 12f): GradientDrawable {
         return GradientDrawable(
             GradientDrawable.Orientation.TOP_BOTTOM,
             intArrayOf(palette.accentLight, palette.accent)
         ).apply {
             cornerRadius = dpf(context, radiusDp)
-            setStroke(dp(context, 1f), 0x4DFFFFFF)
+            setStroke(dp(context, 1f), 0x33FFFFFF)
         }
     }
 

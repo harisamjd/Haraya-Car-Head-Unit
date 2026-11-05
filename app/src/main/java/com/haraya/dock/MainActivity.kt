@@ -10,7 +10,11 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.pm.ResolveInfo
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Typeface
+import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.Drawable
 import android.location.Geocoder
 import android.location.Location
 import android.location.LocationListener
@@ -67,7 +71,7 @@ class MainActivity : Activity(), LocationListener {
     data class AppEntry(
         val label: String,
         val packageName: String,
-        val resolveInfo: ResolveInfo
+        val cachedIcon: Drawable
     )
 
     private val themeResolver = ThemeResolver()
@@ -89,6 +93,7 @@ class MainActivity : Activity(), LocationListener {
     private var currentStreetLabel: String = "Mencari Jalan..."
 
     // Root & Backdrop
+    private lateinit var rootFrame: FrameLayout
     private lateinit var silkBackground: SilkBackgroundView
     private lateinit var mainShell: LinearLayout
     private lateinit var sidebarLayout: LinearLayout
@@ -198,7 +203,7 @@ class MainActivity : Activity(), LocationListener {
         tripServiceManager = TripAndServiceManager(this)
         weatherFetcher = WeatherFetcher(this)
 
-        val rootFrame = FrameLayout(this)
+        rootFrame = FrameLayout(this)
         silkBackground = SilkBackgroundView(this)
         rootFrame.addView(
             silkBackground,
@@ -359,14 +364,35 @@ class MainActivity : Activity(), LocationListener {
     }
 
     private fun setScreen(screen: AppScreen) {
+        val screenChanged = currentScreen != screen
         currentScreen = screen
         val showCarCockpit = (screen == AppScreen.HOME && homeStyle == HomeStyle.CAR_COCKPIT)
         carCockpitView.visibility = if (showCarCockpit) View.VISIBLE else View.GONE
         mainShell.visibility = if (showCarCockpit) View.GONE else View.VISIBLE
+        silkBackground.visibility = if (showCarCockpit) View.GONE else View.VISIBLE
 
         homeCockpitLayout.visibility = if (screen == AppScreen.HOME && homeStyle == HomeStyle.CLASSIC_SILK) View.VISIBLE else View.GONE
         obdDashboardLayout.visibility = if (screen == AppScreen.OBD) View.VISIBLE else View.GONE
         appsDrawerLayout.visibility = if (screen == AppScreen.APPS) View.VISIBLE else View.GONE
+
+        val activeTarget: View = when {
+            showCarCockpit -> carCockpitView
+            screen == AppScreen.OBD -> obdDashboardLayout
+            screen == AppScreen.APPS -> appsDrawerLayout
+            else -> homeCockpitLayout
+        }
+        if (screenChanged) {
+            activeTarget.alpha = 0f
+            activeTarget.scaleX = 0.985f
+            activeTarget.scaleY = 0.985f
+            activeTarget.animate()
+                .alpha(1f)
+                .scaleX(1f)
+                .scaleY(1f)
+                .setDuration(140L)
+                .withLayer()
+                .start()
+        }
 
         if (screen == AppScreen.APPS && allApps.isEmpty()) {
             loadInstalledAppsAsync()
@@ -1232,6 +1258,12 @@ class MainActivity : Activity(), LocationListener {
         return card
     }
 
+    private class AppGridViewHolder(
+        val container: LinearLayout,
+        val iconIv: ImageView,
+        val labelTv: TextView
+    )
+
     private inner class AppsGridAdapter : BaseAdapter() {
         override fun getCount(): Int = filteredApps.size
         override fun getItem(position: Int): AppEntry = filteredApps[position]
@@ -1239,69 +1271,83 @@ class MainActivity : Activity(), LocationListener {
 
         override fun getView(position: Int, convertView: View?, parent: ViewGroup?): View {
             val entry = getItem(position)
-            val container = (convertView as? LinearLayout) ?: LinearLayout(this@MainActivity).apply {
-                orientation = LinearLayout.VERTICAL
-                gravity = Gravity.CENTER
-                val p = dp(6f)
-                setPadding(p, p, p, p)
-
+            val holder: AppGridViewHolder
+            if (convertView == null) {
                 val iconIv = ImageView(this@MainActivity).apply {
-                    id = 1001
                     scaleType = ImageView.ScaleType.FIT_CENTER
                 }
-                addView(iconIv, LinearLayout.LayoutParams(dp(44f), dp(44f)))
-
                 val labelTv = TextView(this@MainActivity).apply {
-                    id = 1002
                     textSize = 10.5f
                     typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
                     gravity = Gravity.CENTER
                     maxLines = 1
                     ellipsize = TextUtils.TruncateAt.END
                 }
-                addView(labelTv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                    topMargin = dp(4f)
-                })
+                val container = LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    gravity = Gravity.CENTER
+                    val p = dp(6f)
+                    setPadding(p, p, p, p)
+                    addView(iconIv, LinearLayout.LayoutParams(dp(44f), dp(44f)))
+                    addView(labelTv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                        topMargin = dp(4f)
+                    })
+                }
+                GlassTheme.makePressable(this@MainActivity, container, palette, 12f)
+                holder = AppGridViewHolder(container, iconIv, labelTv)
+                container.tag = holder
+            } else {
+                holder = convertView.tag as AppGridViewHolder
             }
 
-            GlassTheme.makePressable(this@MainActivity, container, palette, 12f)
-            container.background = null
+            holder.labelTv.text = entry.label
+            holder.labelTv.setTextColor(palette.textPrimary)
+            holder.iconIv.setImageDrawable(entry.cachedIcon)
 
-            val iconIv = container.findViewById<ImageView>(1001)
-            val labelTv = container.findViewById<TextView>(1002)
-
-            labelTv.text = entry.label
-            labelTv.setTextColor(palette.textPrimary)
-
-            iconIv.setImageDrawable(entry.resolveInfo.loadIcon(packageManager))
-
-            container.setOnClickListener {
+            holder.container.setOnClickListener {
                 packageManager.getLaunchIntentForPackage(entry.packageName)?.let {
                     it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     startActivity(it)
                 }
             }
 
-            return container
+            return holder.container
         }
+    }
+
+    private fun renderCompactIcon(raw: Drawable, targetPx: Int): Drawable {
+        if (raw is BitmapDrawable && raw.bitmap != null &&
+            raw.bitmap.width <= targetPx && raw.bitmap.height <= targetPx
+        ) {
+            return raw
+        }
+        return runCatching {
+            val bmp = Bitmap.createBitmap(targetPx, targetPx, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bmp)
+            raw.setBounds(0, 0, targetPx, targetPx)
+            raw.draw(canvas)
+            BitmapDrawable(resources, bmp)
+        }.getOrDefault(raw)
     }
 
     private fun loadInstalledAppsAsync() {
         Thread {
+            val iconPx = dp(46f)
             val mainIntent = Intent(Intent.ACTION_MAIN, null).apply {
                 addCategory(Intent.CATEGORY_LAUNCHER)
             }
             val resolveInfos = packageManager.queryIntentActivities(mainIntent, 0)
                 .filter { it.activityInfo.packageName != packageName }
-                .sortedBy { it.loadLabel(packageManager).toString().lowercase(Locale.getDefault()) }
 
             val list = resolveInfos.map {
+                val lbl = it.loadLabel(packageManager).toString()
+                val rawIcon = it.loadIcon(packageManager)
                 AppEntry(
-                    label = it.loadLabel(packageManager).toString(),
+                    label = lbl,
                     packageName = it.activityInfo.packageName,
-                    resolveInfo = it
+                    cachedIcon = renderCompactIcon(rawIcon, iconPx)
                 )
-            }
+            }.sortedBy { it.label.lowercase(Locale.getDefault()) }
 
             runOnUiThread {
                 allApps.clear()
@@ -1337,8 +1383,13 @@ class MainActivity : Activity(), LocationListener {
         val themeRes = themeResolver.resolve(themeMode, currentLat, currentLon)
         palette = if (themeRes.isDark) GlassTheme.Dark else GlassTheme.Light
 
-        // 1. Latar Sutra & Sidebar
-        silkBackground.setThemeMode(palette.isDark)
+        // 1. Latar Matte / Sutra & Sidebar
+        rootFrame.setBackgroundColor(palette.windowBg)
+        val showCarCockpit = (currentScreen == AppScreen.HOME && homeStyle == HomeStyle.CAR_COCKPIT)
+        silkBackground.visibility = if (showCarCockpit) View.GONE else View.VISIBLE
+        if (!showCarCockpit) {
+            silkBackground.setThemeMode(palette.isDark)
+        }
         sidebarLayout.background = GlassTheme.sidebarDrawable(this, palette)
         updateSidebarSelection()
 
@@ -1875,7 +1926,6 @@ class MainActivity : Activity(), LocationListener {
         }
 
         reverseGeocodeAsync(currentLat, currentLon)
-        refreshClockAndSchedule()
     }
 
     private fun reverseGeocodeAsync(lat: Double, lon: Double) {

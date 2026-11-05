@@ -12,16 +12,26 @@ import java.util.concurrent.Executors
 import kotlin.math.*
 
 /**
- * Live Slippy Map Tile Renderer (CartoDB / OpenStreetMap z=15) dengan penanda posisi GPS
- * dan fallback kanvas vektor ketika sedang offline.
+ * Live OpenStreetMap Slippy Tile Renderer (tile.openstreetmap.org, z=15)
+ * tanpa butuh API Key, lengkap dengan filter Dark-Mode otomotif dan fallback vektor offline.
  */
 class MapCanvasView(context: Context) : View(context) {
 
     companion object {
         private const val ZOOM = 15
-        private val tileCache = object : LruCache<String, Bitmap>(48) {}
+        private val tileCache = object : LruCache<String, Bitmap>(64) {}
         private val inflightKeys = mutableSetOf<String>()
         private val executor = Executors.newFixedThreadPool(3)
+
+        // Filter matriks warna untuk mengubah tile OpenStreetMap terang menjadi Dark Mode navigasi
+        private val DARK_MAP_FILTER = ColorMatrixColorFilter(
+            floatArrayOf(
+                -0.82f,  0.00f,  0.00f, 0f, 215f,
+                 0.00f, -0.80f,  0.00f, 0f, 215f,
+                 0.00f,  0.00f, -0.68f, 0f, 235f,
+                 0.00f,  0.00f,  0.00f, 1f,   0f
+            )
+        )
     }
 
     private var cachedBitmap: Bitmap? = null
@@ -39,33 +49,31 @@ class MapCanvasView(context: Context) : View(context) {
 
     fun updateLocation(lat: Double, lon: Double, label: String? = null) {
         val moved = abs(lat - currentLat) > 0.0001 || abs(lon - currentLon) > 0.0001
+        val labelChanged = !label.isNullOrBlank() && label != streetLabel
         currentLat = lat
         currentLon = lon
         if (!label.isNullOrBlank()) {
             streetLabel = label
         }
-        if (moved || cachedBitmap == null) {
-            renderMap(width, height)
-            invalidate()
-        } else {
+        if (moved || labelChanged) {
             invalidate()
         }
     }
 
     fun applyTheme(newPalette: GlassPalette) {
-        if (palette.isDark != newPalette.isDark || cachedBitmap == null) {
-            palette = newPalette
-            renderMap(width, height)
-            invalidate()
-        } else {
-            palette = newPalette
+        val themeChanged = palette.isDark != newPalette.isDark
+        palette = newPalette
+        tilePaint.colorFilter = if (palette.isDark) DARK_MAP_FILTER else null
+        if (themeChanged || cachedBitmap == null) {
+            renderFallbackMap(width, height)
             invalidate()
         }
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        renderMap(w, h)
+        tilePaint.colorFilter = if (palette.isDark) DARK_MAP_FILTER else null
+        renderFallbackMap(w, h)
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -73,25 +81,27 @@ class MapCanvasView(context: Context) : View(context) {
         val h = height.toFloat()
         if (w <= 0f || h <= 0f) return
 
-        // Coba gambar tile peta nyata (OSM / CartoDB)
-        val hasRealTiles = drawLiveSlippyTiles(canvas, w, h)
+        // Latar dasar peta
+        canvas.drawColor(if (palette.isDark) 0xFF141824.toInt() else 0xFFEAE8E3.toInt())
+
+        // Gambar tile OpenStreetMap asli
+        val hasRealTiles = drawLiveOsmTiles(canvas, w, h)
         if (!hasRealTiles) {
-            // Fallback vektor jika tile sedang diunduh atau offline
             cachedBitmap?.let { canvas.drawBitmap(it, 0f, 0f, null) }
         }
 
         // Gambar titik posisi kendaraan di tengah peta
         val carX = w * 0.50f
-        val carY = h * 0.48f
+        val carY = h * 0.46f
         overlayPaint.style = Paint.Style.FILL
         overlayPaint.color = (palette.accent and 0x00FFFFFF) or 0x44000000
-        canvas.drawCircle(carX, carY, GlassTheme.dp(context, 18f).toFloat(), overlayPaint)
+        canvas.drawCircle(carX, carY, GlassTheme.dp(context, 16f).toFloat(), overlayPaint)
 
         overlayPaint.color = 0xFFFFFFFF.toInt()
-        canvas.drawCircle(carX, carY, GlassTheme.dp(context, 7.5f).toFloat(), overlayPaint)
+        canvas.drawCircle(carX, carY, GlassTheme.dp(context, 7f).toFloat(), overlayPaint)
 
         overlayPaint.color = palette.accent
-        canvas.drawCircle(carX, carY, GlassTheme.dp(context, 5.2f).toFloat(), overlayPaint)
+        canvas.drawCircle(carX, carY, GlassTheme.dp(context, 4.8f).toFloat(), overlayPaint)
 
         // Gambar pill keterangan jalan / lokasi di pojok kiri bawah dalam peta
         if (streetLabel.isNotBlank()) {
@@ -112,7 +122,7 @@ class MapCanvasView(context: Context) : View(context) {
 
             badgeRect.set(pillLeft, pillTop, pillRight, pillBottom)
             overlayPaint.style = Paint.Style.FILL
-            overlayPaint.color = if (palette.isDark) 0xCC111424.toInt() else 0xDDFDFCFB.toInt()
+            overlayPaint.color = if (palette.isDark) 0xD8111420.toInt() else 0xE6FFFFFF.toInt()
             canvas.drawRoundRect(badgeRect, pillH / 2f, pillH / 2f, overlayPaint)
 
             overlayPaint.style = Paint.Style.STROKE
@@ -126,7 +136,7 @@ class MapCanvasView(context: Context) : View(context) {
         }
     }
 
-    private fun drawLiveSlippyTiles(canvas: Canvas, w: Float, h: Float): Boolean {
+    private fun drawLiveOsmTiles(canvas: Canvas, w: Float, h: Float): Boolean {
         val n = (1 shl ZOOM).toDouble()
         val exactX = (currentLon + 180.0) / 360.0 * n
         val latRad = Math.toRadians(currentLat.coerceIn(-85.0, 85.0))
@@ -138,8 +148,7 @@ class MapCanvasView(context: Context) : View(context) {
         val offsetPxY = ((exactY - centerTileY) * 256.0).toFloat()
 
         val centerX = w * 0.50f
-        val centerY = h * 0.48f
-        val styleKey = if (palette.isDark) "dark" else "light"
+        val centerY = h * 0.46f
 
         var drawnCount = 0
         for (dx in -1..1) {
@@ -148,7 +157,7 @@ class MapCanvasView(context: Context) : View(context) {
                 val ty = centerTileY + dy
                 if (tx < 0 || ty < 0 || tx >= n.toInt() || ty >= n.toInt()) continue
 
-                val key = "$styleKey/$ZOOM/$tx/$ty"
+                val key = "osm_v2/$ZOOM/$tx/$ty"
                 val bmp = tileCache.get(key)
                 val left = centerX - offsetPxX + dx * 256f
                 val top = centerY - offsetPxY + dy * 256f
@@ -157,29 +166,25 @@ class MapCanvasView(context: Context) : View(context) {
                     canvas.drawBitmap(bmp, left, top, tilePaint)
                     drawnCount++
                 } else {
-                    fetchTileAsync(styleKey, ZOOM, tx, ty, key)
+                    fetchOsmTileAsync(ZOOM, tx, ty, key)
                 }
             }
         }
         return drawnCount > 0
     }
 
-    private fun fetchTileAsync(styleKey: String, z: Int, x: Int, y: Int, cacheKey: String) {
+    private fun fetchOsmTileAsync(z: Int, x: Int, y: Int, cacheKey: String) {
         synchronized(inflightKeys) {
             if (inflightKeys.contains(cacheKey)) return
             inflightKeys.add(cacheKey)
         }
         executor.execute {
             try {
-                val urlStr = if (styleKey == "dark") {
-                    "https://a.basemaps.cartocdn.com/dark_all/$z/$x/$y.png"
-                } else {
-                    "https://a.basemaps.cartocdn.com/rastertiles/voyager/$z/$x/$y.png"
-                }
+                val urlStr = "https://tile.openstreetmap.org/$z/$x/$y.png"
                 val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
                     connectTimeout = 5000
                     readTimeout = 5000
-                    setRequestProperty("User-Agent", "HarayaDock/1.0 (Android Automotive Cockpit)")
+                    setRequestProperty("User-Agent", "HarayaDock/1.1 (https://github.com/harisamjd/Haraya-Car-Head-Unit)")
                 }
                 if (conn.responseCode == 200) {
                     val bmp = conn.inputStream.use { BitmapFactory.decodeStream(it) }
@@ -198,10 +203,10 @@ class MapCanvasView(context: Context) : View(context) {
         }
     }
 
-    private fun renderMap(w: Int, h: Int) {
+    private fun renderFallbackMap(w: Int, h: Int) {
         if (w <= 0 || h <= 0) return
         cachedBitmap?.recycle()
-        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.RGB_565)
         val c = Canvas(bmp)
         paintCartography(c, w.toFloat(), h.toFloat(), palette)
         cachedBitmap = bmp
@@ -209,12 +214,12 @@ class MapCanvasView(context: Context) : View(context) {
 
     private fun paintCartography(c: Canvas, w: Float, h: Float, pal: GlassPalette) {
         val d = pal.isDark
-        val base = if (d) 0xFF1A1C2E.toInt() else 0xFFEAE8E3.toInt()
-        val park = if (d) 0xFF1F3532.toInt() else 0xFFCDE3C3.toInt()
-        val water = if (d) 0xFF223659.toInt() else 0xFFB6D4EE.toInt()
-        val minorRoad = if (d) 0xFF2B2E48.toInt() else 0xFFF7F6F2.toInt()
-        val majorRoad = if (d) 0xFF393D5E.toInt() else 0xFFFFFFFF.toInt()
-        val roadEdge = if (d) 0xFF252840.toInt() else 0xFFD5D4CE.toInt()
+        val base = if (d) 0xFF151824.toInt() else 0xFFEAE8E3.toInt()
+        val park = if (d) 0xFF1B2E2B.toInt() else 0xFFCDE3C3.toInt()
+        val water = if (d) 0xFF1D2F4C.toInt() else 0xFFB6D4EE.toInt()
+        val minorRoad = if (d) 0xFF25293E.toInt() else 0xFFF7F6F2.toInt()
+        val majorRoad = if (d) 0xFF323752.toInt() else 0xFFFFFFFF.toInt()
+        val roadEdge = if (d) 0xFF1F2336.toInt() else 0xFFD5D4CE.toInt()
         val routeColor = pal.accent
 
         c.drawColor(base)
