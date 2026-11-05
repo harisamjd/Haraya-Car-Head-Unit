@@ -29,8 +29,11 @@ import android.view.inputmethod.EditorInfo
 import android.widget.*
 import com.haraya.dock.calc.PrayerCalc
 import com.haraya.dock.data.QuoteRepository
+import com.haraya.dock.data.TripAndServiceManager
+import com.haraya.dock.data.WeatherFetcher
 import com.haraya.dock.theme.ThemeMode
 import com.haraya.dock.theme.ThemeResolver
+import com.haraya.dock.ui.CarCockpitView
 import com.haraya.dock.ui.MapCanvasView
 import com.haraya.dock.ui.RpmGaugeView
 import com.haraya.dock.ui.SpeedGaugeView
@@ -52,6 +55,11 @@ class MainActivity : Activity(), LocationListener {
         APPS
     }
 
+    enum class HomeStyle {
+        CAR_COCKPIT,
+        CLASSIC_SILK
+    }
+
     data class AppEntry(
         val label: String,
         val packageName: String,
@@ -60,9 +68,13 @@ class MainActivity : Activity(), LocationListener {
 
     private val themeResolver = ThemeResolver()
     private var themeMode: ThemeMode = ThemeMode.AUTO
+    private var homeStyle: HomeStyle = HomeStyle.CAR_COCKPIT
     private var palette: GlassPalette = GlassTheme.Dark
     private var currentScreen: AppScreen = AppScreen.HOME
     private var quoteIndex: Int = 0
+
+    private lateinit var tripServiceManager: TripAndServiceManager
+    private lateinit var weatherFetcher: WeatherFetcher
 
     // Koordinat lokasi
     private var currentLat: Double = -6.1754
@@ -73,21 +85,24 @@ class MainActivity : Activity(), LocationListener {
 
     // Root & Backdrop
     private lateinit var silkBackground: SilkBackgroundView
+    private lateinit var mainShell: LinearLayout
     private lateinit var sidebarLayout: LinearLayout
     private val sidebarItems = mutableListOf<SidebarItemView>()
     private lateinit var themeSidebarItem: SidebarItemView
 
     // Container Layar Utama
+    private lateinit var carCockpitView: CarCockpitView
     private lateinit var homeCockpitLayout: LinearLayout
     private lateinit var obdDashboardLayout: LinearLayout
     private lateinit var appsDrawerLayout: GlassCardView
 
-    // === KOMPONEN BERANDA (HOME) ===
+    // === KOMPONEN BERANDA KLASIK (CLASSIC HOME) ===
     private lateinit var clockSpeedCard: GlassCardView
     private lateinit var clockTimeTv: TextView
     private lateinit var clockDateTv: TextView
     private lateinit var themeStatusTv: TextView
     private lateinit var launcherStatusBtn: TextView
+    private lateinit var switchToCarModeBtn: TextView
     private lateinit var speedWell: FrameLayout
     private lateinit var speedGauge: SpeedGaugeView
 
@@ -165,7 +180,12 @@ class MainActivity : Activity(), LocationListener {
         val prefs = getSharedPreferences("haraya_prefs", Context.MODE_PRIVATE)
         val savedMode = prefs.getString("theme_mode", ThemeMode.AUTO.name) ?: ThemeMode.AUTO.name
         themeMode = runCatching { ThemeMode.valueOf(savedMode) }.getOrDefault(ThemeMode.AUTO)
+        val savedStyle = prefs.getString("home_style", HomeStyle.CAR_COCKPIT.name) ?: HomeStyle.CAR_COCKPIT.name
+        homeStyle = runCatching { HomeStyle.valueOf(savedStyle) }.getOrDefault(HomeStyle.CAR_COCKPIT)
         quoteIndex = prefs.getInt("quote_idx", 0)
+
+        tripServiceManager = TripAndServiceManager(this)
+        weatherFetcher = WeatherFetcher(this)
 
         val rootFrame = FrameLayout(this)
         silkBackground = SilkBackgroundView(this)
@@ -174,13 +194,70 @@ class MainActivity : Activity(), LocationListener {
             FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         )
 
-        val mainShell = LinearLayout(this).apply {
+        // 1. TAMPILAN COCKPIT MOBIL TENGAH (Suzuki Baleno - 3 Kolom + Top Bar + Bottom Dock)
+        carCockpitView = CarCockpitView(
+            context = this,
+            tripServiceManager = tripServiceManager,
+            onSwitchThemeMode = { targetMode ->
+                themeMode = targetMode
+                prefs.edit().putString("theme_mode", themeMode.name).apply()
+                themeSidebarItem.setLabel(themeModeLabel())
+                refreshAll()
+            },
+            onSwitchToClassicLayout = {
+                setHomeStyle(HomeStyle.CLASSIC_SILK)
+            },
+            onOpenMaps = {
+                launchPackageOrMarket(listOf("com.google.android.apps.maps", "com.waze"), "Google Maps")
+            },
+            onShareLiveLocation = {
+                openGoogleMapsLocationSharing()
+            },
+            onRequestLocationPermission = {
+                requestLocationPermissionIfNeeded()
+            },
+            onOpenMusic = {
+                launchPackageOrMarket(
+                    listOf(
+                        "app.revanced.android.apps.youtube.music",
+                        "com.google.android.apps.youtube.music",
+                        "com.spotify.music",
+                        "com.android.music"
+                    ),
+                    "YouTube Music"
+                )
+            },
+            onOpenYouTube = {
+                launchPackageOrMarket(
+                    listOf(
+                        "app.revanced.android.youtube",
+                        "com.google.android.youtube"
+                    ),
+                    "YouTube"
+                )
+            },
+            onOpenPhone = {
+                openPhoneDialer()
+            },
+            onOpenObdScreen = {
+                setScreen(AppScreen.OBD)
+            },
+            onOpenAppsScreen = {
+                setScreen(AppScreen.APPS)
+            },
+            onRequestDefaultLauncher = {
+                requestSetDefaultLauncher()
+            }
+        )
+        carCockpitView.updateWeather(weatherFetcher.getCachedWeather())
+
+        // 2. SHELL MODE KLASIK + LAYAR OBD & APPS DRAWER
+        mainShell = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             val pad = dp(12f)
             setPadding(pad, pad, pad, pad)
         }
 
-        // 1. SIDEBAR KIRI (Tetap terlihat di semua layar)
         sidebarLayout = buildSidebar()
         mainShell.addView(
             sidebarLayout,
@@ -189,7 +266,6 @@ class MainActivity : Activity(), LocationListener {
             }
         )
 
-        // 2. KONTEN TENGAH (BERANDA, OBD, ATAU SEMUA APLIKASI)
         val contentFrame = FrameLayout(this)
 
         homeCockpitLayout = buildHomeCockpit()
@@ -218,12 +294,21 @@ class MainActivity : Activity(), LocationListener {
             mainShell,
             FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         )
+        rootFrame.addView(
+            carCockpitView,
+            FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        )
         setContentView(rootFrame)
 
         setScreen(AppScreen.HOME)
         refreshAll()
         requestLocationPermissionIfNeeded()
         loadInstalledAppsAsync()
+        weatherFetcher.fetchIfNeeded(currentLat, currentLon) { weather ->
+            runOnUiThread {
+                carCockpitView.updateWeather(weather)
+            }
+        }
     }
 
     override fun onResume() {
@@ -253,9 +338,21 @@ class MainActivity : Activity(), LocationListener {
         }
     }
 
+    private fun setHomeStyle(style: HomeStyle) {
+        homeStyle = style
+        getSharedPreferences("haraya_prefs", Context.MODE_PRIVATE)
+            .edit().putString("home_style", style.name).apply()
+        setScreen(currentScreen)
+        refreshAll()
+    }
+
     private fun setScreen(screen: AppScreen) {
         currentScreen = screen
-        homeCockpitLayout.visibility = if (screen == AppScreen.HOME) View.VISIBLE else View.GONE
+        val showCarCockpit = (screen == AppScreen.HOME && homeStyle == HomeStyle.CAR_COCKPIT)
+        carCockpitView.visibility = if (showCarCockpit) View.VISIBLE else View.GONE
+        mainShell.visibility = if (showCarCockpit) View.GONE else View.VISIBLE
+
+        homeCockpitLayout.visibility = if (screen == AppScreen.HOME && homeStyle == HomeStyle.CLASSIC_SILK) View.VISIBLE else View.GONE
         obdDashboardLayout.visibility = if (screen == AppScreen.OBD) View.VISIBLE else View.GONE
         appsDrawerLayout.visibility = if (screen == AppScreen.APPS) View.VISIBLE else View.GONE
 
@@ -439,8 +536,22 @@ class MainActivity : Activity(), LocationListener {
                 requestSetDefaultLauncher()
             }
         }
+        switchToCarModeBtn = TextView(this).apply {
+            text = "Mode Mobil"
+            textSize = 10.5f
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+            val pH = dp(7f)
+            val pV = dp(3f)
+            setPadding(pH, pV, pH, pV)
+            setOnClickListener {
+                setHomeStyle(HomeStyle.CAR_COCKPIT)
+            }
+        }
         pillRow.addView(themeStatusTv)
         pillRow.addView(launcherStatusBtn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            leftMargin = dp(6f)
+        })
+        pillRow.addView(switchToCarModeBtn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
             leftMargin = dp(6f)
         })
 
@@ -1231,6 +1342,9 @@ class MainActivity : Activity(), LocationListener {
         themeStatusTv.setTextColor(palette.selectFg)
         themeStatusTv.background = GlassTheme.selectDrawable(this, palette, 10f)
         updateLauncherStatus()
+        switchToCarModeBtn.setTextColor(palette.textPrimary)
+        switchToCarModeBtn.background = GlassTheme.innerDrawable(this, palette, 10f)
+        GlassTheme.makePressable(this, switchToCarModeBtn, palette, 10f)
         speedWell.background = GlassTheme.innerDrawable(this, palette, 16f)
         speedGauge.applyTheme(palette)
 
@@ -1314,6 +1428,9 @@ class MainActivity : Activity(), LocationListener {
         appsEmptyTv.setTextColor(palette.textMuted)
         appsAdapter.notifyDataSetChanged()
 
+        // 8. Car Cockpit View (Mode Mobil Tengah)
+        carCockpitView.applyTheme(palette, themeMode, isDefaultLauncher())
+
         refreshClockAndSchedule()
         refreshQuote()
     }
@@ -1322,10 +1439,13 @@ class MainActivity : Activity(), LocationListener {
         val now = Date()
         val timeFmt = SimpleDateFormat("HH:mm", Locale("id", "ID"))
         val dateFmt = SimpleDateFormat("EEEE, d MMM yyyy", Locale("id", "ID"))
-        clockTimeTv.text = timeFmt.format(now)
+        val clockStr = timeFmt.format(now)
+        clockTimeTv.text = clockStr
         clockDateTv.text = dateFmt.format(now)
 
         val prayers = PrayerCalc.calculate(currentLat, currentLon)
+        carCockpitView.updateClockAndPrayer(clockStr, prayers)
+        carCockpitView.refreshTripAndServices()
         val hrs = prayers.nextPrayerRemainingMinutes / 60
         val mins = prayers.nextPrayerRemainingMinutes % 60
         val countdownStr = if (hrs > 0) "${hrs}j ${mins}m" else "${mins}m"
@@ -1448,6 +1568,17 @@ class MainActivity : Activity(), LocationListener {
         }
     }
 
+    private fun openPhoneDialer() {
+        try {
+            val intent = Intent(Intent.ACTION_DIAL).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            startActivity(intent)
+        } catch (_: Exception) {
+            Toast.makeText(this, "Aplikasi Telepon tidak ditemukan di perangkat ini", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     private fun launchPackageOrMarket(candidates: List<String>, label: String) {
         for (pkg in candidates) {
             val launchIntent = packageManager.getLaunchIntentForPackage(pkg)
@@ -1535,9 +1666,21 @@ class MainActivity : Activity(), LocationListener {
         currentKmh = if (location.hasSpeed()) (location.speed * 3.6f).roundToInt() else 0
         speedGauge.setSpeed(currentKmh)
         obdSpeedGauge.setSpeed(currentKmh)
+        carCockpitView.updateSpeed(currentKmh)
+
+        tripServiceManager.onLocationUpdate(location)
+        carCockpitView.refreshTripAndServices()
 
         val providerLabel = if (location.provider == LocationManager.GPS_PROVIDER) "GPS Akurat" else "Jaringan"
-        locSubTv.text = String.format(Locale.US, "%.4f, %.4f • %s", currentLat, currentLon, providerLabel)
+        val coordSub = String.format(Locale.US, "%.4f, %.4f • %s", currentLat, currentLon, providerLabel)
+        locSubTv.text = coordSub
+        carCockpitView.updateLocationInfo(locTitleTv.text.toString(), coordSub)
+
+        weatherFetcher.fetchIfNeeded(currentLat, currentLon) { weather ->
+            runOnUiThread {
+                carCockpitView.updateWeather(weather)
+            }
+        }
 
         reverseGeocodeAsync(currentLat, currentLon)
         refreshClockAndSchedule()
@@ -1563,6 +1706,7 @@ class MainActivity : Activity(), LocationListener {
                         val title = if (district.isNotEmpty() && district != city) "$district, $city" else city
                         runOnUiThread {
                             locTitleTv.text = title
+                            carCockpitView.updateLocationInfo(title, locSubTv.text.toString())
                         }
                     }
                 }

@@ -31,7 +31,18 @@ class VectorIconView(
         PIN,
         CAR,
         GAUGE,
-        SEARCH
+        SEARCH,
+        OIL_DROP,
+        GEAR_COG,
+        SNOWFLAKE,
+        WRENCH,
+        CLOUD_SUN,
+        PREV_TRACK,
+        PLAY_PAUSE,
+        NEXT_TRACK,
+        ROUTE,
+        BELL,
+        LAYOUT_SWITCH
     }
 
     private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -253,6 +264,119 @@ class VectorIconView(
                     cy + 6f * u,
                     strokePaint
                 )
+            }
+
+            IconType.OIL_DROP -> {
+                // Tetesan oli mesin
+                path.moveTo(cx, cy - 7.5f * u)
+                path.quadTo(cx + 6f * u, cy + 0.5f * u, cx + 5f * u, cy + 4.5f * u)
+                rect.set(cx - 5f * u, cy - 1f * u, cx + 5f * u, cy + 7.5f * u)
+                path.arcTo(rect, 0f, 180f, false)
+                path.quadTo(cx - 6f * u, cy + 0.5f * u, cx, cy - 7.5f * u)
+                path.close()
+                canvas.drawPath(path, strokePaint)
+            }
+
+            IconType.GEAR_COG -> {
+                // Roda gigi transmisi / setelan
+                canvas.drawCircle(cx, cy, 3.2f * u, strokePaint)
+                for (i in 0 until 8) {
+                    val angle = Math.toRadians((i * 45).toDouble())
+                    val r1 = 4.6f * u
+                    val r2 = 7.4f * u
+                    canvas.drawLine(
+                        cx + (r1 * cos(angle)).toFloat(),
+                        cy + (r1 * sin(angle)).toFloat(),
+                        cx + (r2 * cos(angle)).toFloat(),
+                        cy + (r2 * sin(angle)).toFloat(),
+                        strokePaint
+                    )
+                }
+            }
+
+            IconType.SNOWFLAKE -> {
+                // Kristal es AC
+                for (i in 0 until 6) {
+                    val angle = Math.toRadians((i * 60).toDouble())
+                    canvas.drawLine(
+                        cx - (7f * u * cos(angle)).toFloat(),
+                        cy - (7f * u * sin(angle)).toFloat(),
+                        cx + (7f * u * cos(angle)).toFloat(),
+                        cy + (7f * u * sin(angle)).toFloat(),
+                        strokePaint
+                    )
+                }
+            }
+
+            IconType.WRENCH -> {
+                // Kunci pas servis / tune-up
+                canvas.drawCircle(cx - 3.2f * u, cy - 3.2f * u, 3.6f * u, strokePaint)
+                canvas.drawLine(cx - 0.5f * u, cy - 0.5f * u, cx + 6.5f * u, cy + 6.5f * u, strokePaint)
+            }
+
+            IconType.CLOUD_SUN -> {
+                // Awan cuaca & matahari
+                canvas.drawCircle(cx - 2.5f * u, cy - 3f * u, 3.2f * u, strokePaint)
+                rect.set(cx - 6.5f * u, cy - 1f * u, cx + 6.5f * u, cy + 5.5f * u)
+                canvas.drawRoundRect(rect, 3.2f * u, 3.2f * u, fillPaint)
+            }
+
+            IconType.PREV_TRACK -> {
+                // Lagu sebelumnya
+                canvas.drawLine(cx - 5.5f * u, cy - 5f * u, cx - 5.5f * u, cy + 5f * u, strokePaint)
+                path.moveTo(cx + 5f * u, cy - 5f * u)
+                path.lineTo(cx - 3f * u, cy)
+                path.lineTo(cx + 5f * u, cy + 5f * u)
+                path.close()
+                canvas.drawPath(path, fillPaint)
+            }
+
+            IconType.PLAY_PAUSE -> {
+                // Segitiga Play
+                path.moveTo(cx - 3.5f * u, cy - 5.5f * u)
+                path.lineTo(cx + 5.5f * u, cy)
+                path.lineTo(cx - 3.5f * u, cy + 5.5f * u)
+                path.close()
+                canvas.drawPath(path, fillPaint)
+            }
+
+            IconType.NEXT_TRACK -> {
+                // Lagu berikutnya
+                canvas.drawLine(cx + 5.5f * u, cy - 5f * u, cx + 5.5f * u, cy + 5f * u, strokePaint)
+                path.moveTo(cx - 5f * u, cy - 5f * u)
+                path.lineTo(cx + 3f * u, cy)
+                path.lineTo(cx - 5f * u, cy + 5f * u)
+                path.close()
+                canvas.drawPath(path, fillPaint)
+            }
+
+            IconType.ROUTE -> {
+                // Jalur S-curve perjalanan
+                canvas.drawCircle(cx - 5f * u, cy + 5f * u, 2f * u, fillPaint)
+                canvas.drawCircle(cx + 5f * u, cy - 5f * u, 2f * u, fillPaint)
+                path.moveTo(cx - 5f * u, cy + 5f * u)
+                path.cubicTo(cx - 5f * u, cy - 4f * u, cx + 5f * u, cy + 4f * u, cx + 5f * u, cy - 5f * u)
+                canvas.drawPath(path, strokePaint)
+            }
+
+            IconType.BELL -> {
+                // Lonceng pengingat
+                path.moveTo(cx - 5.5f * u, cy + 3.5f * u)
+                path.lineTo(cx - 4.5f * u, cy - 2.5f * u)
+                rect.set(cx - 4.5f * u, cy - 6.5f * u, cx + 4.5f * u, cy + 1.5f * u)
+                path.arcTo(rect, 180f, 180f, false)
+                path.lineTo(cx + 5.5f * u, cy + 3.5f * u)
+                path.close()
+                canvas.drawPath(path, strokePaint)
+                canvas.drawCircle(cx, cy + 6f * u, 1.5f * u, fillPaint)
+            }
+
+            IconType.LAYOUT_SWITCH -> {
+                // Ikon tata letak 3 kolom kokpit
+                rect.set(cx - 7.5f * u, cy - 5.5f * u, cx + 7.5f * u, cy + 5.5f * u)
+                canvas.drawRoundRect(rect, 2f * u, 2f * u, strokePaint)
+                canvas.drawLine(cx - 2.5f * u, cy - 5.5f * u, cx - 2.5f * u, cy + 5.5f * u, strokePaint)
+                canvas.drawLine(cx + 2.5f * u, cy - 5.5f * u, cx + 2.5f * u, cy + 5.5f * u, strokePaint)
             }
         }
     }

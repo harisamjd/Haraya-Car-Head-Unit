@@ -88,3 +88,4 @@ adb install -r -t app/build/outputs/apk/debug/app-debug.apk
 
 Proyek ini dibangun secara mandiri di bawah lisensi MIT.
 Komponen latar belakang kain sutra dan logika instrumen terinspirasi dari arsitektur [`agungpmbd/goldendash`](https://github.com/agungpmbd/goldendash) (MIT).
+
