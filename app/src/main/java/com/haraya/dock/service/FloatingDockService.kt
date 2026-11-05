@@ -16,6 +16,7 @@ import android.provider.Settings
 import android.text.TextUtils
 import android.view.Gravity
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -29,11 +30,12 @@ import com.haraya.dock.ui.glass.GlassTheme
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.abs
 
 /**
- * Persistent Floating Dock Overlay (SYSTEM_ALERT_WINDOW) yang tetap tampil di bagian bawah layar
- * saat pengguna membuka aplikasi eksternal (YouTube, Spotify, Google Maps, Waze, dll.),
- * sehingga semua aplikasi terasa "embedded" di dalam bingkai Haraya Dock.
+ * Persistent Floating Dock Overlay (SYSTEM_ALERT_WINDOW) with AssistiveTouch-style
+ * collapsible & freely draggable circular orb so it never blocks bottom menus in
+ * WhatsApp, YouTube, Instagram, or Maps.
  */
 class FloatingDockService : Service() {
 
@@ -90,14 +92,21 @@ class FloatingDockService : Service() {
 
     private var windowManager: WindowManager? = null
     private var rootOverlayContainer: FrameLayout? = null
+    private var windowParams: WindowManager.LayoutParams? = null
     private var expandedBar: LinearLayout? = null
-    private var collapsedPill: LinearLayout? = null
+    private var assistiveOrbBox: FrameLayout? = null
+    private var assistiveOrbIcon: VectorIconView? = null
+    private var collapseShortcutBtn: FrameLayout? = null
+    private var collapseShortcutIcon: VectorIconView? = null
     private var isCollapsed: Boolean = false
+
+    // Saved AssistiveTouch orb position (offset from TOP|START)
+    private var orbPosX: Int = 24
+    private var orbPosY: Int = 180
 
     private var speedClockTv: TextView? = null
     private var mediaTitleTv: TextView? = null
     private var playPauseIcon: VectorIconView? = null
-    private var collapsedTextTv: TextView? = null
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private val periodicTicker = object : Runnable {
@@ -112,6 +121,11 @@ class FloatingDockService : Service() {
     override fun onCreate() {
         super.onCreate()
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        val prefs = getSharedPreferences("haraya_prefs", Context.MODE_PRIVATE)
+        val dm = resources.displayMetrics
+        orbPosX = prefs.getInt("assistive_orb_x", (dm.widthPixels - GlassTheme.dp(this, 64f)).coerceAtLeast(16))
+        orbPosY = prefs.getInt("assistive_orb_y", (dm.heightPixels * 0.55f).toInt())
+        isCollapsed = prefs.getBoolean("assistive_orb_collapsed", false)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -153,24 +167,24 @@ class FloatingDockService : Service() {
         val dp = { v: Float -> GlassTheme.dp(this, v) }
         val container = FrameLayout(this)
 
-        // 1. Expanded Floating Dock Bar (Tengah Bawah)
+        // 1. Expanded Floating Dock Bar (Bottom Center)
         val bar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(12f), dp(6f), dp(12f), dp(6f))
         }
 
-        // Tombol Beranda Haraya
-        val homeBtn = buildActionPill("Beranda", VectorIconView.IconType.HOME, isHighlight = true) {
+        // Home Button
+        val homeBtn = buildActionPill("Home", VectorIconView.IconType.HOME, isHighlight = true) {
             openHarayaScreen(MainActivity.EXTRA_TARGET_HOME)
         }
         bar.addView(homeBtn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
             rightMargin = dp(8f)
         })
 
-        // Indikator Kecepatan & Jam Live
+        // Live Speed & Clock Indicator
         val scTv = TextView(this).apply {
-            text = "0 km/j • --:--"
+            text = "0 km/h • --:--"
             textSize = 10f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
             fontFeatureSettings = "tnum"
@@ -182,14 +196,14 @@ class FloatingDockService : Service() {
             rightMargin = dp(8f)
         })
 
-        // Kontrol Media Mini (Judul Lagu + Prev/Play/Next)
+        // Mini Media Controls (Song Title + Prev/Play/Next)
         val mediaGroup = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(10f), dp(4f), dp(6f), dp(4f))
         }
         val mTv = TextView(this).apply {
-            text = "Kontrol Media"
+            text = "Media Control"
             textSize = 9.5f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
             includeFontPadding = false
@@ -223,14 +237,14 @@ class FloatingDockService : Service() {
             rightMargin = dp(8f)
         })
 
-        // Tombol Peta, OBD, & Semua Aplikasi
-        val mapBtn = buildActionPill("Peta", VectorIconView.IconType.MAPS, isHighlight = false) {
+        // Map, OBD, & Apps Shortcuts
+        val mapBtn = buildActionPill("Map", VectorIconView.IconType.MAPS, isHighlight = false) {
             openHarayaScreen(MainActivity.EXTRA_TARGET_MAP)
         }
         val obdBtn = buildActionPill("OBD", VectorIconView.IconType.GAUGE, isHighlight = false) {
             openHarayaScreen(MainActivity.EXTRA_TARGET_OBD)
         }
-        val appsBtn = buildActionPill("Aplikasi", VectorIconView.IconType.APPS_GRID, isHighlight = false) {
+        val appsBtn = buildActionPill("Apps", VectorIconView.IconType.APPS_GRID, isHighlight = false) {
             openHarayaScreen(MainActivity.EXTRA_TARGET_APPS)
         }
         bar.addView(mapBtn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
@@ -240,51 +254,36 @@ class FloatingDockService : Service() {
             rightMargin = dp(6f)
         })
         bar.addView(appsBtn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-            rightMargin = dp(6f)
+            rightMargin = dp(8f)
         })
 
-        // Tombol Kecilkan Dock (Minimize)
-        val minBtn = TextView(this).apply {
-            text = "▾"
-            textSize = 11f
-            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-            gravity = Gravity.CENTER
-            includeFontPadding = false
-            setPadding(dp(8f), dp(4f), dp(8f), dp(4f))
+        // Circular AssistiveTouch Collapse Shortcut Button
+        val collapseIcon = VectorIconView(this, VectorIconView.IconType.ASSISTIVE_ORB)
+        val collapseBtn = FrameLayout(this).apply {
+            tag = "collapse_orb_shortcut"
+            addView(collapseIcon, FrameLayout.LayoutParams(dp(18f), dp(18f), Gravity.CENTER))
             setOnClickListener {
-                isCollapsed = true
-                updateCollapseVisibility()
+                setCollapsedState(true)
             }
         }
-        bar.addView(minBtn)
+        collapseShortcutBtn = collapseBtn
+        collapseShortcutIcon = collapseIcon
+        bar.addView(collapseBtn, LinearLayout.LayoutParams(dp(30f), dp(30f)))
 
-        // 2. Collapsed Mini Pill (Saat dikecilkan agar tidak menghalangi tombol bawah aplikasi)
-        val miniPill = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(12f), dp(6f), dp(12f), dp(6f))
+        // 2. Collapsed AssistiveTouch Floating Circle (46dp x 46dp, freely draggable!)
+        val orbIcon = VectorIconView(this, VectorIconView.IconType.ASSISTIVE_ORB)
+        assistiveOrbIcon = orbIcon
+        val orbCircle = FrameLayout(this).apply {
             visibility = View.GONE
-            setOnClickListener {
-                isCollapsed = false
-                updateCollapseVisibility()
-            }
+            addView(orbIcon, FrameLayout.LayoutParams(dp(26f), dp(26f), Gravity.CENTER))
         }
-        val miniIcon = VectorIconView(this, VectorIconView.IconType.HOME)
-        val miniTv = TextView(this).apply {
-            text = "Haraya Dock • 0 km/j ▴"
-            textSize = 10f
-            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-            includeFontPadding = false
-        }
-        collapsedTextTv = miniTv
-        miniPill.addView(miniIcon, LinearLayout.LayoutParams(dp(14f), dp(14f)).apply { rightMargin = dp(6f) })
-        miniPill.addView(miniTv)
+        setupAssistiveOrbDragAndTap(orbCircle)
+        assistiveOrbBox = orbCircle
 
         expandedBar = bar
-        collapsedPill = miniPill
 
-        container.addView(bar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL))
-        container.addView(miniPill, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.END))
+        container.addView(bar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        container.addView(orbCircle, FrameLayout.LayoutParams(dp(46f), dp(46f)))
 
         val overlayType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -301,21 +300,113 @@ class FloatingDockService : Service() {
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
             PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-            y = dp(6f)
-        }
+        )
+        windowParams = lp
 
         runCatching {
             windowManager?.addView(container, lp)
             rootOverlayContainer = container
+            updateCollapseVisibility()
             applyThemeAndRefresh()
         }
     }
 
+    private fun setupAssistiveOrbDragAndTap(orbView: View) {
+        var downRawX = 0f
+        var downRawY = 0f
+        var startOrbX = 0
+        var startOrbY = 0
+        var dragging = false
+        val touchSlop = GlassTheme.dp(this, 6f)
+
+        orbView.setOnTouchListener { _, event ->
+            val lp = windowParams ?: return@setOnTouchListener false
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    downRawX = event.rawX
+                    downRawY = event.rawY
+                    startOrbX = lp.x
+                    startOrbY = lp.y
+                    dragging = false
+                    orbView.alpha = 1.0f
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = (event.rawX - downRawX).toInt()
+                    val dy = (event.rawY - downRawY).toInt()
+                    if (abs(dx) > touchSlop || abs(dy) > touchSlop) {
+                        dragging = true
+                    }
+                    if (dragging) {
+                        val dm = resources.displayMetrics
+                        val maxW = (dm.widthPixels - GlassTheme.dp(this, 48f)).coerceAtLeast(0)
+                        val maxH = (dm.heightPixels - GlassTheme.dp(this, 48f)).coerceAtLeast(0)
+                        orbPosX = (startOrbX + dx).coerceIn(0, maxW)
+                        orbPosY = (startOrbY + dy).coerceIn(0, maxH)
+                        lp.x = orbPosX
+                        lp.y = orbPosY
+                        runCatching { windowManager?.updateViewLayout(rootOverlayContainer, lp) }
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    if (dragging) {
+                        // Snap to nearest horizontal screen edge like AssistiveTouch
+                        val dm = resources.displayMetrics
+                        val edgeMargin = GlassTheme.dp(this, 10f)
+                        val maxW = (dm.widthPixels - GlassTheme.dp(this, 56f)).coerceAtLeast(edgeMargin)
+                        orbPosX = if (orbPosX + GlassTheme.dp(this, 23f) < dm.widthPixels / 2) {
+                            edgeMargin
+                        } else {
+                            maxW
+                        }
+                        lp.x = orbPosX
+                        runCatching { windowManager?.updateViewLayout(rootOverlayContainer, lp) }
+                        getSharedPreferences("haraya_prefs", Context.MODE_PRIVATE)
+                            .edit()
+                            .putInt("assistive_orb_x", orbPosX)
+                            .putInt("assistive_orb_y", orbPosY)
+                            .apply()
+                        orbView.alpha = 0.88f
+                    } else {
+                        setCollapsedState(false)
+                    }
+                    true
+                }
+                else -> false
+            }
+        }
+    }
+
+    private fun setCollapsedState(collapsed: Boolean) {
+        isCollapsed = collapsed
+        getSharedPreferences("haraya_prefs", Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean("assistive_orb_collapsed", isCollapsed)
+            .apply()
+        updateCollapseVisibility()
+    }
+
     private fun updateCollapseVisibility() {
-        expandedBar?.visibility = if (isCollapsed) View.GONE else View.VISIBLE
-        collapsedPill?.visibility = if (isCollapsed) View.VISIBLE else View.GONE
+        val lp = windowParams ?: return
+        val dp = { v: Float -> GlassTheme.dp(this, v) }
+        if (isCollapsed) {
+            expandedBar?.visibility = View.GONE
+            assistiveOrbBox?.visibility = View.VISIBLE
+            assistiveOrbBox?.alpha = 0.88f
+            lp.gravity = Gravity.TOP or Gravity.START
+            lp.x = orbPosX
+            lp.y = orbPosY
+        } else {
+            expandedBar?.visibility = View.VISIBLE
+            assistiveOrbBox?.visibility = View.GONE
+            lp.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+            lp.x = 0
+            lp.y = dp(6f)
+        }
+        if (rootOverlayContainer != null) {
+            runCatching { windowManager?.updateViewLayout(rootOverlayContainer, lp) }
+        }
     }
 
     private fun buildActionPill(label: String, iconType: VectorIconView.IconType, isHighlight: Boolean, onClick: () -> Unit): LinearLayout {
@@ -393,34 +484,35 @@ class FloatingDockService : Service() {
                             (btn.getChildAt(0) as? VectorIconView)?.setTint(pal.selectFg)
                         }
                     }
-                    child is TextView -> {
-                        // Minimize button
-                        child.background = GlassTheme.innerDrawable(this, pal, 8f)
-                        child.setTextColor(pal.textSecondary)
+                    child === collapseShortcutBtn -> {
+                        child.background = GradientDrawable().apply {
+                            shape = GradientDrawable.OVAL
+                            setColor(pal.innerBottom)
+                            setStroke(dp(1.2f), pal.accent)
+                        }
+                        collapseShortcutIcon?.setTint(pal.accent)
                     }
                 }
             }
         }
 
-        collapsedPill?.let { pill ->
-            pill.background = GradientDrawable(
+        assistiveOrbBox?.let { orb ->
+            orb.background = GradientDrawable(
                 GradientDrawable.Orientation.TOP_BOTTOM,
                 intArrayOf(pal.overTop, pal.overBottom)
             ).apply {
-                cornerRadius = GlassTheme.dpf(this@FloatingDockService, 14f)
-                setStroke(dp(1.2f), pal.accent)
+                shape = GradientDrawable.OVAL
+                setStroke(dp(1.6f), pal.accent)
             }
-            (pill.getChildAt(0) as? VectorIconView)?.setTint(pal.accent)
-            collapsedTextTv?.setTextColor(pal.textPrimary)
+            assistiveOrbIcon?.setTint(pal.accent)
         }
 
         refreshOverlayContent()
     }
 
     private fun refreshOverlayContent() {
-        val clockStr = SimpleDateFormat("HH:mm", Locale("id", "ID")).format(Date())
-        speedClockTv?.text = "$currentSpeedKmh km/j • $clockStr"
-        collapsedTextTv?.text = "Haraya • $currentSpeedKmh km/j • $clockStr ▴"
+        val clockStr = SimpleDateFormat("HH:mm", Locale.US).format(Date())
+        speedClockTv?.text = "$currentSpeedKmh km/h • $clockStr"
 
         val playing = NotificationCollectorService.isCurrentlyPlaying(this)
         playPauseIcon?.setIcon(
@@ -430,7 +522,7 @@ class FloatingDockService : Service() {
         mediaTitleTv?.text = if (!title.isNullOrBlank()) {
             (if (playing) "▶ " else "⏸ ") + title
         } else {
-            if (playing) "▶ Musik Aktif" else "Kontrol Media"
+            if (playing) "▶ Active Audio" else "Media Control"
         }
     }
 
@@ -478,7 +570,6 @@ class FloatingDockService : Service() {
         }
         rootOverlayContainer = null
         expandedBar = null
-        collapsedPill = null
+        assistiveOrbBox = null
     }
 }
-

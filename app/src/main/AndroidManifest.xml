@@ -7,8 +7,11 @@
     <!-- Cuaca Open-Meteo & Tile Peta OSM -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <!-- Status Bluetooth di dock -->
+    <!-- Bluetooth OBD-II ELM327 & Audio status -->
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
     <!-- Pengaturan kecerahan layar -->
     <uses-permission android:name="android.permission.WRITE_SETTINGS" />
     <!-- Persistent Floating Dock Overlay saat aplikasi eksternal dibuka -->

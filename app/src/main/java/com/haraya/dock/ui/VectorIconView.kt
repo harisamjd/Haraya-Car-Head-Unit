@@ -44,7 +44,14 @@ class VectorIconView(
         ROUTE,
         BELL,
         LAYOUT_SWITCH,
-        LOCK
+        LOCK,
+        SUN,
+        MOON,
+        AUTO_A,
+        ZOOM_IN,
+        ZOOM_OUT,
+        RECENTER_DOT,
+        ASSISTIVE_ORB
     }
 
     private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -396,6 +403,92 @@ class VectorIconView(
                 rect.set(cx - 3.8f * u, cy - 7.5f * u, cx + 3.8f * u, cy + 0.5f * u)
                 canvas.drawArc(rect, 180f, 180f, false, strokePaint)
                 canvas.drawCircle(cx, cy + 3.2f * u, 1.4f * u, fillPaint)
+            }
+
+            IconType.SUN -> {
+                // Sun (Light Theme Mode)
+                canvas.drawCircle(cx, cy, 4.2f * u, strokePaint)
+                for (i in 0 until 8) {
+                    val angle = Math.toRadians((i * 45).toDouble())
+                    val r1 = 6.4f * u
+                    val r2 = 8.8f * u
+                    canvas.drawLine(
+                        cx + (r1 * cos(angle)).toFloat(),
+                        cy + (r1 * sin(angle)).toFloat(),
+                        cx + (r2 * cos(angle)).toFloat(),
+                        cy + (r2 * sin(angle)).toFloat(),
+                        strokePaint
+                    )
+                }
+            }
+
+            IconType.MOON -> {
+                // Crescent Moon (Dark Theme Mode)
+                path.moveTo(cx + 2.2f * u, cy - 7.5f * u)
+                rect.set(cx - 7.5f * u, cy - 7.5f * u, cx + 7.5f * u, cy + 7.5f * u)
+                path.arcTo(rect, -72f, 235f, false)
+                path.quadTo(cx - 1.5f * u, cy + 1.5f * u, cx + 2.2f * u, cy - 7.5f * u)
+                path.close()
+                canvas.drawPath(path, strokePaint)
+            }
+
+            IconType.AUTO_A -> {
+                // Letter 'A' inside subtle ring (Auto Theme Mode)
+                canvas.drawCircle(cx, cy, 8.6f * u, strokePaint)
+                path.moveTo(cx - 4.2f * u, cy + 4.4f * u)
+                path.lineTo(cx, cy - 4.8f * u)
+                path.lineTo(cx + 4.2f * u, cy + 4.4f * u)
+                path.moveTo(cx - 2.6f * u, cy + 1.4f * u)
+                path.lineTo(cx + 2.6f * u, cy + 1.4f * u)
+                canvas.drawPath(path, strokePaint)
+            }
+
+            IconType.ZOOM_IN -> {
+                // Magnifying Glass +
+                val glassR = 5.4f * u
+                val gCx = cx - 1.8f * u
+                val gCy = cy - 1.8f * u
+                canvas.drawCircle(gCx, gCy, glassR, strokePaint)
+                canvas.drawLine(gCx - 2.6f * u, gCy, gCx + 2.6f * u, gCy, strokePaint)
+                canvas.drawLine(gCx, gCy - 2.6f * u, gCx, gCy + 2.6f * u, strokePaint)
+                canvas.drawLine(
+                    gCx + glassR * 0.707f,
+                    gCy + glassR * 0.707f,
+                    cx + 7.4f * u,
+                    cy + 7.4f * u,
+                    strokePaint
+                )
+            }
+
+            IconType.ZOOM_OUT -> {
+                // Magnifying Glass -
+                val glassR = 5.4f * u
+                val gCx = cx - 1.8f * u
+                val gCy = cy - 1.8f * u
+                canvas.drawCircle(gCx, gCy, glassR, strokePaint)
+                canvas.drawLine(gCx - 2.6f * u, gCy, gCx + 2.6f * u, gCy, strokePaint)
+                canvas.drawLine(
+                    gCx + glassR * 0.707f,
+                    gCy + glassR * 0.707f,
+                    cx + 7.4f * u,
+                    cy + 7.4f * u,
+                    strokePaint
+                )
+            }
+
+            IconType.RECENTER_DOT -> {
+                // Target circle + solid center dot
+                canvas.drawCircle(cx, cy, 6.8f * u, strokePaint)
+                canvas.drawCircle(cx, cy, 2.8f * u, fillPaint)
+            }
+
+            IconType.ASSISTIVE_ORB -> {
+                // AssistiveTouch Concentric Circles
+                canvas.drawCircle(cx, cy, 8.6f * u, strokePaint)
+                strokePaint.alpha = (Color.alpha(tintColor) * 0.65f).toInt()
+                canvas.drawCircle(cx, cy, 5.6f * u, strokePaint)
+                strokePaint.alpha = Color.alpha(tintColor)
+                canvas.drawCircle(cx, cy, 3.0f * u, fillPaint)
             }
         }
     }

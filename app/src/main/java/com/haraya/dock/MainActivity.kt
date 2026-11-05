@@ -2,14 +2,12 @@ package com.haraya.dock
 
 import android.Manifest
 import android.app.Activity
-import android.app.AlertDialog
 import android.app.role.RoleManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
-import android.content.pm.ResolveInfo
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Typeface
@@ -25,7 +23,6 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.text.Editable
-import android.text.InputFilter
 import android.text.InputType
 import android.text.TextUtils
 import android.text.TextWatcher
@@ -35,6 +32,8 @@ import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.widget.*
 import com.haraya.dock.calc.PrayerCalc
+import com.haraya.dock.data.AdhanPlayerManager
+import com.haraya.dock.data.ObdConnectionManager
 import com.haraya.dock.data.QuoteRepository
 import com.haraya.dock.data.TripAndServiceManager
 import com.haraya.dock.data.WeatherFetcher
@@ -55,6 +54,7 @@ import com.haraya.dock.ui.glass.GlassTheme
 import com.haraya.dock.ui.glass.SilkBackgroundView
 import java.text.SimpleDateFormat
 import java.util.*
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 class MainActivity : Activity(), LocationListener {
@@ -65,6 +65,10 @@ class MainActivity : Activity(), LocationListener {
         const val EXTRA_TARGET_MAP = "MAP"
         const val EXTRA_TARGET_OBD = "OBD"
         const val EXTRA_TARGET_APPS = "APPS"
+
+        private const val REQUEST_CODE_LOCATION = 101
+        private const val REQUEST_CODE_BLUETOOTH = 102
+        private const val REQUEST_CODE_PICK_CAR_IMAGE = 202
     }
 
     enum class AppScreen {
@@ -94,15 +98,19 @@ class MainActivity : Activity(), LocationListener {
     private var floatingDockEnabled: Boolean = true
 
     private lateinit var tripServiceManager: TripAndServiceManager
+    private lateinit var adhanPlayerManager: AdhanPlayerManager
+    private lateinit var obdConnectionManager: ObdConnectionManager
     private lateinit var weatherFetcher: WeatherFetcher
 
-    // Koordinat lokasi
+    // Location coordinates
     private var currentLat: Double = -6.1754
     private var currentLon: Double = 106.8272
+    private var lastPrayerCalcLat: Double = -6.1754
+    private var lastPrayerCalcLon: Double = 106.8272
     private var currentKmh: Int = 0
     private var lastGeocodedLat: Double = 0.0
     private var lastGeocodedLon: Double = 0.0
-    private var currentStreetLabel: String = "Mencari Jalan..."
+    private var currentStreetLabel: String = "Locating Street..."
 
     // Root & Backdrop
     private lateinit var rootFrame: FrameLayout
@@ -113,13 +121,13 @@ class MainActivity : Activity(), LocationListener {
     private val sidebarItems = mutableListOf<SidebarItemView>()
     private lateinit var themeSidebarItem: SidebarItemView
 
-    // Container Layar Utama
+    // Main Containers
     private lateinit var carCockpitView: CarCockpitView
     private lateinit var homeCockpitLayout: LinearLayout
     private lateinit var obdDashboardLayout: LinearLayout
     private lateinit var appsDrawerLayout: GlassCardView
 
-    // === KOMPONEN BERANDA KLASIK (CLASSIC HOME) ===
+    // === CLASSIC HOME COMPONENTS ===
     private lateinit var clockSpeedCard: GlassCardView
     private lateinit var clockTimeTv: TextView
     private lateinit var clockDateTv: TextView
@@ -157,7 +165,7 @@ class MainActivity : Activity(), LocationListener {
     private lateinit var volumeSlider: TactileSliderCard
     private lateinit var brightnessSlider: TactileSliderCard
 
-    // === KOMPONEN OBD DASHBOARD ===
+    // === OBD DASHBOARD COMPONENTS ===
     private lateinit var obdClusterCard: GlassCardView
     private lateinit var obdClusterTitleTv: TextView
     private lateinit var obdGearIndicatorTv: TextView
@@ -179,7 +187,7 @@ class MainActivity : Activity(), LocationListener {
     private lateinit var obdBluetoothSettingsBtn: TextView
     private lateinit var obdBackHomeBtn: TextView
 
-    // === KOMPONEN APPS DRAWER GRID ===
+    // === APPS DRAWER GRID COMPONENTS ===
     private lateinit var appSearchBox: LinearLayout
     private lateinit var appSearchIcon: VectorIconView
     private lateinit var appSearchEt: EditText
@@ -215,6 +223,20 @@ class MainActivity : Activity(), LocationListener {
         floatingDockEnabled = prefs.getBoolean("floating_dock_enabled", true)
 
         tripServiceManager = TripAndServiceManager(this)
+        adhanPlayerManager = AdhanPlayerManager(this).apply {
+            onPlaybackStateChanged = {
+                runOnUiThread {
+                    refreshClockAndSchedule()
+                }
+            }
+        }
+        obdConnectionManager = ObdConnectionManager(this).apply {
+            onTelemetryUpdated = { telemetry ->
+                runOnUiThread {
+                    applyObdTelemetryToUi(telemetry)
+                }
+            }
+        }
         weatherFetcher = WeatherFetcher(this)
 
         rootFrame = FrameLayout(this)
@@ -224,10 +246,11 @@ class MainActivity : Activity(), LocationListener {
             FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         )
 
-        // 1. TAMPILAN COCKPIT MOBIL TENGAH (Suzuki Baleno - 3 Kolom + Top Bar + Bottom Dock + Embedded Stage)
+        // 1. CENTER VEHICLE COCKPIT VIEW (3 Columns + Top Bar + Bottom Dock + Embedded Stages)
         carCockpitView = CarCockpitView(
             context = this,
             tripServiceManager = tripServiceManager,
+            adhanPlayerManager = adhanPlayerManager,
             onSwitchThemeMode = { targetMode ->
                 themeMode = targetMode
                 prefs.edit().putString("theme_mode", themeMode.name).apply()
@@ -278,6 +301,9 @@ class MainActivity : Activity(), LocationListener {
             onOpenObdScreen = {
                 setScreen(AppScreen.OBD)
             },
+            onOpenObdSettingsModal = {
+                openObdConfigurationModal()
+            },
             onOpenSettingsDialog = {
                 showCockpitSettingsDialog()
             },
@@ -287,7 +313,7 @@ class MainActivity : Activity(), LocationListener {
         )
         carCockpitView.updateWeather(weatherFetcher.getCachedWeather())
 
-        // 2. SHELL MODE KLASIK + LAYAR OBD & APPS DRAWER
+        // 2. CLASSIC SHELL + OBD & APPS DRAWER VIEWS
         mainShell = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             val pad = dp(12f)
@@ -339,6 +365,7 @@ class MainActivity : Activity(), LocationListener {
         setScreen(AppScreen.HOME)
         handleIncomingDockIntent(intent)
         refreshAll()
+        applyObdTelemetryToUi(obdConnectionManager.getCurrentTelemetry())
         requestLocationPermissionIfNeeded()
         loadInstalledAppsAsync()
         weatherFetcher.fetchIfNeeded(currentLat, currentLon) { weather ->
@@ -389,9 +416,14 @@ class MainActivity : Activity(), LocationListener {
         super.onPause()
     }
 
+    override fun onDestroy() {
+        adhanPlayerManager.stopAdhanPlayback(notify = false)
+        obdConnectionManager.disconnect()
+        super.onDestroy()
+    }
+
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
-        // Tombol kembali tidak menutup launcher, melainkan kembali ke Beranda jika di Peta, OBD, atau Apps Drawer
         if (currentScreen != AppScreen.HOME) {
             setScreen(AppScreen.HOME)
         }
@@ -406,12 +438,9 @@ class MainActivity : Activity(), LocationListener {
     }
 
     private fun setScreen(screen: AppScreen) {
-        val screenChanged = currentScreen != screen
         currentScreen = screen
 
         if (homeStyle == HomeStyle.CAR_COCKPIT) {
-            // Mode Cockpit Mobil: Top Bar & Bottom Dock SELALU terlihat, semua layar (Home, Peta, OBD, Aplikasi)
-            // di-embed langsung di tengah-tengah CarCockpitView!
             carCockpitView.visibility = View.VISIBLE
             mainShell.visibility = View.GONE
             silkBackground.visibility = View.GONE
@@ -424,7 +453,6 @@ class MainActivity : Activity(), LocationListener {
             }
             carCockpitView.setCockpitStage(stage, obdDashboardLayout, appsDrawerLayout)
         } else {
-            // Mode Sutra Klasik: Sidebar Kiri tetap terlihat
             carCockpitView.visibility = View.GONE
             mainShell.visibility = View.VISIBLE
             silkBackground.visibility = View.VISIBLE
@@ -468,7 +496,7 @@ class MainActivity : Activity(), LocationListener {
     }
 
     // ==========================================
-    // SIDEBAR NAVIGATION
+    // SIDEBAR NAVIGATION (CLASSIC MODE)
     // ==========================================
     private fun buildSidebar(): LinearLayout {
         val bar = LinearLayout(this).apply {
@@ -488,16 +516,16 @@ class MainActivity : Activity(), LocationListener {
             return item
         }
 
-        addItem(VectorIconView.IconType.HOME, "Beranda") {
+        addItem(VectorIconView.IconType.HOME, "Home") {
             setScreen(AppScreen.HOME)
         }
         addItem(VectorIconView.IconType.CAR, "OBD") {
             setScreen(AppScreen.OBD)
         }
-        addItem(VectorIconView.IconType.MAPS, "Peta") {
+        addItem(VectorIconView.IconType.MAPS, "Maps") {
             launchPackageOrMarket(listOf("com.google.android.apps.maps", "com.waze"), "Google Maps")
         }
-        addItem(VectorIconView.IconType.MUSIC, "Musik") {
+        addItem(VectorIconView.IconType.MUSIC, "Music") {
             launchPackageOrMarket(
                 listOf(
                     "app.revanced.android.apps.youtube.music",
@@ -517,7 +545,7 @@ class MainActivity : Activity(), LocationListener {
                 "YouTube"
             )
         }
-        addItem(VectorIconView.IconType.APPS_GRID, "Aplikasi") {
+        addItem(VectorIconView.IconType.APPS_GRID, "Apps") {
             setScreen(AppScreen.APPS)
         }
         themeSidebarItem = addItem(VectorIconView.IconType.THEME_MODE, themeModeLabel()) {
@@ -528,7 +556,7 @@ class MainActivity : Activity(), LocationListener {
     }
 
     // ==========================================
-    // BERANDA (HOME COCKPIT)
+    // CLASSIC HOME COCKPIT
     // ==========================================
     private fun buildHomeCockpit(): LinearLayout {
         val row = LinearLayout(this).apply {
@@ -630,7 +658,7 @@ class MainActivity : Activity(), LocationListener {
             }
         }
         switchToCarModeBtn = TextView(this).apply {
-            text = "Mode Mobil"
+            text = "Cockpit Mode"
             textSize = 10.5f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
             val pH = dp(7f)
@@ -682,7 +710,7 @@ class MainActivity : Activity(), LocationListener {
             gravity = Gravity.CENTER_VERTICAL
         }
         prayerTitleTv = TextView(this).apply {
-            text = "Jadwal Sholat"
+            text = "Prayer Times"
             textSize = 13f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
         }
@@ -700,7 +728,7 @@ class MainActivity : Activity(), LocationListener {
         val scheduleStrip = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
         }
-        val labels = listOf("Subuh", "Dzuhur", "Ashar", "Maghrib", "Isya")
+        val labels = listOf("Fajr", "Dhuhr", "Asr", "Maghrib", "Isha")
         for (i in labels.indices) {
             val slot = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -815,14 +843,14 @@ class MainActivity : Activity(), LocationListener {
             orientation = LinearLayout.VERTICAL
         }
         locTitleTv = TextView(this).apply {
-            text = "Mencari Lokasi..."
+            text = "Locating..."
             textSize = 13.5f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
         }
         locSubTv = TextView(this).apply {
-            text = "GPS Terhubung"
+            text = "GPS Connected"
             textSize = 10.5f
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
@@ -850,7 +878,7 @@ class MainActivity : Activity(), LocationListener {
         }
         shareCtaIcon = VectorIconView(this, VectorIconView.IconType.SHARE)
         shareCtaTv = TextView(this).apply {
-            text = "Bagikan Lokasi Live"
+            text = "Share Live Location"
             textSize = 11.5f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
         }
@@ -885,7 +913,7 @@ class MainActivity : Activity(), LocationListener {
         }
         navFooterIcon = VectorIconView(this, VectorIconView.IconType.MAPS)
         navFooterTv = TextView(this).apply {
-            text = "Ketuk area peta untuk membuka navigasi Google Maps"
+            text = "Tap map area to launch Google Maps navigation"
             textSize = 11.5f
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
         }
@@ -919,7 +947,7 @@ class MainActivity : Activity(), LocationListener {
         volumeSlider = TactileSliderCard(
             this,
             VectorIconView.IconType.VOLUME,
-            "Volume Media",
+            "Media Volume",
             curVol.toFloat() / maxVol.toFloat()
         ) { frac ->
             val target = (frac * maxVol).roundToInt().coerceIn(0, maxVol)
@@ -929,7 +957,7 @@ class MainActivity : Activity(), LocationListener {
         brightnessSlider = TactileSliderCard(
             this,
             VectorIconView.IconType.BRIGHTNESS,
-            "Kecerahan",
+            "Brightness",
             0.75f
         ) { frac ->
             val lp = window.attributes
@@ -965,12 +993,12 @@ class MainActivity : Activity(), LocationListener {
             gravity = Gravity.CENTER_VERTICAL
         }
         obdClusterTitleTv = TextView(this).apply {
-            text = "Cluster Instrumen Kendaraan"
+            text = "Vehicle Instrument Cluster"
             textSize = 14f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
         }
         obdGearIndicatorTv = TextView(this).apply {
-            text = "P   R   N   [ D ]"
+            text = "[ P ]   R   N   D"
             textSize = 11.5f
             typeface = Typeface.create("sans-serif", Typeface.BOLD)
             val pH = dp(8f)
@@ -1007,7 +1035,7 @@ class MainActivity : Activity(), LocationListener {
         })
 
         obdClusterFooterTv = TextView(this).apply {
-            text = "Transmisi: Otomatis • Suhu Oli: 89°C • Sistem Pengapian: ON"
+            text = "Transmission: Automatic • Oil Temp: 89°C • Ignition: ON"
             textSize = 10.5f
             gravity = Gravity.CENTER
         }
@@ -1032,7 +1060,7 @@ class MainActivity : Activity(), LocationListener {
         }
 
         obdSensorsTitleTv = TextView(this).apply {
-            text = "Sensor Mesin Real-Time (ECU)"
+            text = "Real-Time Engine Sensors (ECU)"
             textSize = 13.5f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
         }
@@ -1044,8 +1072,8 @@ class MainActivity : Activity(), LocationListener {
             orientation = LinearLayout.VERTICAL
         }
         val sensorData = listOf(
-            listOf(Triple("Suhu Radiator", "88°C", "Optimal"), Triple("Tegangan Aki", "14.2 V", "Alternator"), Triple("Beban Mesin", "22%", "Ringan")),
-            listOf(Triple("Konsumsi BBM", "12.8 km/L", "Rata-rata"), Triple("Suhu Intake", "32°C", "Normal"), Triple("Bukaan Gas", "14%", "Throttle"))
+            listOf(Triple("Coolant Temp", "88°C", "Optimal"), Triple("Battery Voltage", "14.2 V", "Alternator"), Triple("Engine Load", "22%", "Light")),
+            listOf(Triple("Fuel Economy", "12.8 km/L", "Average"), Triple("Intake Temp", "32°C", "Normal"), Triple("Throttle Pos", "14%", "Sensor"))
         )
 
         for (rowIdx in sensorData.indices) {
@@ -1120,12 +1148,12 @@ class MainActivity : Activity(), LocationListener {
             gravity = Gravity.CENTER_VERTICAL
         }
         obdBluetoothStatusTv = TextView(this).apply {
-            text = "Bluetooth ELM327: Siap Terhubung"
+            text = "Bluetooth ELM327: Ready to Connect"
             textSize = 11.5f
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
         }
         obdDtcStatusTv = TextView(this).apply {
-            text = "Check Engine: Aman (0 DTC)"
+            text = "Check Engine: OK (0 DTC)"
             textSize = 11.5f
             gravity = Gravity.END
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
@@ -1140,7 +1168,7 @@ class MainActivity : Activity(), LocationListener {
             orientation = LinearLayout.HORIZONTAL
         }
         obdScanDtcBtn = TextView(this).apply {
-            text = "Pindai Kode Kerusakan (DTC)"
+            text = "Scan Fault Codes (DTC)"
             textSize = 11f
             gravity = Gravity.CENTER
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
@@ -1148,11 +1176,11 @@ class MainActivity : Activity(), LocationListener {
             val pV = dp(6f)
             setPadding(pH, pV, pH, pV)
             setOnClickListener {
-                Toast.makeText(this@MainActivity, "Memindai ECU... Tidak ada kode kerusakan DTC terdeteksi.", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@MainActivity, "Scanning ECU (Mode 03)... 0 Fault Codes (DTC) detected.", Toast.LENGTH_SHORT).show()
             }
         }
         obdBluetoothSettingsBtn = TextView(this).apply {
-            text = "Hubungkan Dongle OBD"
+            text = "OBD & Speedo Settings"
             textSize = 11f
             gravity = Gravity.CENTER
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
@@ -1160,15 +1188,11 @@ class MainActivity : Activity(), LocationListener {
             val pV = dp(6f)
             setPadding(pH, pV, pH, pV)
             setOnClickListener {
-                runCatching {
-                    startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
-                }.onFailure {
-                    Toast.makeText(this@MainActivity, "Buka Pengaturan HP > Bluetooth untuk menghubungkan ELM327", Toast.LENGTH_SHORT).show()
-                }
+                openObdConfigurationModal()
             }
         }
         obdBackHomeBtn = TextView(this).apply {
-            text = "Kembali ke Beranda"
+            text = "Back to Home"
             textSize = 11f
             gravity = Gravity.CENTER
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
@@ -1180,13 +1204,13 @@ class MainActivity : Activity(), LocationListener {
             }
         }
 
-        diagActionRow.addView(obdScanDtcBtn, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.2f).apply {
+        diagActionRow.addView(obdScanDtcBtn, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.15f).apply {
             rightMargin = dp(6f)
         })
-        diagActionRow.addView(obdBluetoothSettingsBtn, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+        diagActionRow.addView(obdBluetoothSettingsBtn, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.1f).apply {
             rightMargin = dp(6f)
         })
-        diagActionRow.addView(obdBackHomeBtn, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.9f))
+        diagActionRow.addView(obdBackHomeBtn, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.85f))
         diagCol.addView(diagActionRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
         obdDiagCard.addView(diagCol, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
@@ -1203,6 +1227,51 @@ class MainActivity : Activity(), LocationListener {
         return row
     }
 
+    private fun applyObdTelemetryToUi(telemetry: ObdConnectionManager.ObdTelemetry) {
+        currentKmh = telemetry.speedKmh
+        speedGauge.setSpeed(telemetry.speedKmh)
+        obdSpeedGauge.setSpeed(telemetry.speedKmh)
+        obdRpmGauge.setRpm(telemetry.rpm.coerceAtLeast(if (telemetry.connected) 780 else 0))
+        carCockpitView.updateObdTelemetry(telemetry)
+        FloatingDockService.notifyStateUpdated(this, currentKmh, palette.isDark)
+
+        val g = telemetry.gearLabel
+        obdGearIndicatorTv.text = when {
+            g.startsWith("D") -> "P   R   N   [ $g ]"
+            g == "N" -> "P   R   [ N ]   D"
+            g == "R" -> "P   [ R ]   N   D"
+            else -> "[ P ]   R   N   D"
+        }
+
+        if (obdSensorValues.size >= 6) {
+            obdSensorValues[0].text = "${telemetry.coolantTempC}°C"
+            obdSensorValues[1].text = String.format(Locale.US, "%.1f V", telemetry.batteryVoltage)
+            obdSensorValues[2].text = "${telemetry.engineLoadPct}%"
+            obdSensorValues[4].text = "${telemetry.intakeTempC}°C"
+            obdSensorValues[5].text = "${telemetry.throttlePct}%"
+        }
+
+        obdBluetoothStatusTv.text = if (telemetry.connected) {
+            "● Connected: ${telemetry.deviceName} (${telemetry.sourceLabel})"
+        } else {
+            "Bluetooth ELM327: Disconnected (${telemetry.sourceLabel})"
+        }
+    }
+
+    private fun openObdConfigurationModal() {
+        obdConnectionManager.showObdSettingsModal(this, palette) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                requestPermissions(
+                    arrayOf(
+                        Manifest.permission.BLUETOOTH_CONNECT,
+                        Manifest.permission.BLUETOOTH_SCAN
+                    ),
+                    REQUEST_CODE_BLUETOOTH
+                )
+            }
+        }
+    }
+
     // ==========================================
     // DEDICATED APPS DRAWER (GRID LAUNCHER)
     // ==========================================
@@ -1215,7 +1284,6 @@ class MainActivity : Activity(), LocationListener {
             orientation = LinearLayout.VERTICAL
         }
 
-        // Header Row: Kotak Pencarian + Hitungan Aplikasi + Tombol Kembali
         val headerRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -1234,7 +1302,7 @@ class MainActivity : Activity(), LocationListener {
         })
 
         appSearchEt = EditText(this).apply {
-            hint = "Cari dari semua aplikasi..."
+            hint = "Search installed apps..."
             textSize = 12.5f
             background = null
             setSingleLine(true)
@@ -1254,7 +1322,7 @@ class MainActivity : Activity(), LocationListener {
         })
 
         appCountTv = TextView(this).apply {
-            text = "0 Aplikasi"
+            text = "0 Apps"
             textSize = 11.5f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
             val pH = dp(10f)
@@ -1266,7 +1334,7 @@ class MainActivity : Activity(), LocationListener {
         })
 
         appBackBtn = TextView(this).apply {
-            text = "Kembali ke Beranda"
+            text = "Back to Home"
             textSize = 11.5f
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
             val pH = dp(12f)
@@ -1282,7 +1350,6 @@ class MainActivity : Activity(), LocationListener {
             bottomMargin = dp(10f)
         })
 
-        // Grid Area
         val gridContainer = FrameLayout(this)
         appsGridView = GridView(this).apply {
             numColumns = 6
@@ -1298,7 +1365,7 @@ class MainActivity : Activity(), LocationListener {
         appsGridView.adapter = appsAdapter
 
         appsEmptyTv = TextView(this).apply {
-            text = "Tidak ada aplikasi yang cocok."
+            text = "No matching applications found."
             textSize = 13f
             gravity = Gravity.CENTER
             visibility = View.GONE
@@ -1426,7 +1493,7 @@ class MainActivity : Activity(), LocationListener {
                 }
             }
         }
-        appCountTv.text = "${filteredApps.size} Aplikasi"
+        appCountTv.text = "${filteredApps.size} Apps"
         appsEmptyTv.visibility = if (filteredApps.isEmpty()) View.VISIBLE else View.GONE
         appsAdapter.notifyDataSetChanged()
     }
@@ -1438,9 +1505,9 @@ class MainActivity : Activity(), LocationListener {
         val themeRes = themeResolver.resolve(themeMode, currentLat, currentLon)
         palette = if (themeRes.isDark) GlassTheme.Dark else GlassTheme.Light
 
-        // 1. Latar Matte / Sutra & Sidebar
+        // 1. Matte Backdrop & Sidebar
         rootFrame.setBackgroundColor(palette.windowBg)
-        val showCarCockpit = (currentScreen == AppScreen.HOME && homeStyle == HomeStyle.CAR_COCKPIT)
+        val showCarCockpit = (homeStyle == HomeStyle.CAR_COCKPIT)
         silkBackground.visibility = if (showCarCockpit) View.GONE else View.VISIBLE
         if (!showCarCockpit) {
             silkBackground.setThemeMode(palette.isDark)
@@ -1448,12 +1515,12 @@ class MainActivity : Activity(), LocationListener {
         sidebarLayout.background = GlassTheme.sidebarDrawable(this, palette)
         updateSidebarSelection()
 
-        // 2. Beranda: Jam & Speedo
+        // 2. Classic Home: Clock & Speedo
         clockSpeedCard.applyTheme(palette)
         clockTimeTv.setTextColor(palette.textPrimary)
         clockDateTv.setTextColor(palette.textSecondary)
         themeStatusTv.text = if (themeMode == ThemeMode.AUTO) {
-            if (themeRes.isDark) "Otomatis: Gelap" else "Otomatis: Terang"
+            if (themeRes.isDark) "Auto: Dark" else "Auto: Light"
         } else {
             themeModeLabel()
         }
@@ -1466,14 +1533,14 @@ class MainActivity : Activity(), LocationListener {
         speedWell.background = GlassTheme.innerDrawable(this, palette, 16f)
         speedGauge.applyTheme(palette)
 
-        // 3. Beranda: Sholat & Ayat
+        // 3. Classic Home: Prayer & Verse
         prayerQuoteCard.applyTheme(palette)
         prayerTitleTv.setTextColor(palette.textPrimary)
         prayerCountdownTv.setTextColor(palette.accentLight.takeIf { palette.isDark } ?: palette.accent)
         quoteBox.background = GlassTheme.innerDrawable(this, palette, 14f)
         GlassTheme.makePressable(this, quoteBox, palette, 14f)
 
-        // 4. Beranda: Peta & Share
+        // 4. Classic Home: Map & Share
         mapOuterCard.applyTheme(palette)
         mapCanvas.applyTheme(palette)
         GlassTheme.makePressable(this, mapCanvas, palette, 18f)
@@ -1494,7 +1561,7 @@ class MainActivity : Activity(), LocationListener {
         navFooterIcon.setTint(palette.accent)
         navFooterTv.setTextColor(palette.textPrimary)
 
-        // 5. Beranda: Slider
+        // 5. Sliders
         volumeSlider.applyTheme(palette)
         brightnessSlider.applyTheme(palette)
 
@@ -1546,7 +1613,7 @@ class MainActivity : Activity(), LocationListener {
         appsEmptyTv.setTextColor(palette.textMuted)
         appsAdapter.notifyDataSetChanged()
 
-        // 8. Car Cockpit View (Mode Mobil Tengah)
+        // 8. Center Car Cockpit View
         carCockpitView.applyTheme(palette, themeMode, isGpsProviderActive())
 
         refreshClockAndSchedule()
@@ -1555,23 +1622,30 @@ class MainActivity : Activity(), LocationListener {
 
     private fun refreshClockAndSchedule() {
         val now = Date()
-        val timeFmt = SimpleDateFormat("HH:mm", Locale("id", "ID"))
-        val dateFmt = SimpleDateFormat("EEEE, d MMM yyyy", Locale("id", "ID"))
+        val timeFmt = SimpleDateFormat("HH:mm", Locale.US)
+        val dateFmt = SimpleDateFormat("EEEE, d MMM yyyy", Locale.US)
         val clockStr = timeFmt.format(now)
         clockTimeTv.text = clockStr
         clockDateTv.text = dateFmt.format(now)
 
         val prayers = PrayerCalc.calculate(currentLat, currentLon)
+        lastPrayerCalcLat = currentLat
+        lastPrayerCalcLon = currentLon
+
         carCockpitView.updateGpsStatus(isGpsProviderActive())
         carCockpitView.updateClockAndPrayer(clockStr, prayers)
         carCockpitView.refreshTripAndServices()
+
+        // Check if prayer time has arrived to trigger Adhan alert & audio
+        adhanPlayerManager.checkAndTriggerIfPrayerTimeArrived(this, palette, clockStr, prayers)
+
         val hrs = prayers.nextPrayerRemainingMinutes / 60
         val mins = prayers.nextPrayerRemainingMinutes % 60
-        val countdownStr = if (hrs > 0) "${hrs}j ${mins}m" else "${mins}m"
-        prayerCountdownTv.text = "${prayers.nextPrayerName} ${prayers.nextPrayerTime} • ${countdownStr} lagi"
+        val countdownStr = if (hrs > 0) "${hrs}h ${mins}m" else "${mins}m"
+        prayerCountdownTv.text = "${prayers.nextPrayerName} ${prayers.nextPrayerTime} • in $countdownStr"
 
         val timesList = listOf(prayers.subuh, prayers.dzuhur, prayers.ashar, prayers.maghrib, prayers.isya)
-        val namesList = listOf("Subuh", "Dzuhur", "Ashar", "Maghrib", "Isya")
+        val namesList = listOf("Fajr", "Dhuhr", "Asr", "Maghrib", "Isha")
 
         for (i in 0 until 5) {
             prayerSlotTimes[i].text = timesList[i]
@@ -1594,7 +1668,7 @@ class MainActivity : Activity(), LocationListener {
         quoteArabicTv.setTextColor(palette.textPrimary)
         quoteTranslationTv.text = "\"${quote.translation}\" (${quote.reference})"
         quoteTranslationTv.setTextColor(palette.textSecondary)
-        quoteHintTv.text = "Ketuk kutipan untuk ayat berikutnya (${quoteIndex + 1}/${QuoteRepository.count()})"
+        quoteHintTv.text = "Tap verse for next quote (${quoteIndex + 1}/${QuoteRepository.count()})"
         quoteHintTv.setTextColor(palette.textMuted)
     }
 
@@ -1612,11 +1686,11 @@ class MainActivity : Activity(), LocationListener {
     private fun updateLauncherStatus() {
         val isDefault = isDefaultLauncher()
         if (isDefault) {
-            launcherStatusBtn.text = "Beranda Default"
+            launcherStatusBtn.text = "Default Home"
             launcherStatusBtn.setTextColor(palette.selectFg)
             launcherStatusBtn.background = GlassTheme.selectDrawable(this, palette, 10f)
         } else {
-            launcherStatusBtn.text = "Setel Beranda"
+            launcherStatusBtn.text = "Set as Home"
             launcherStatusBtn.setTextColor(palette.accentLight.takeIf { palette.isDark } ?: palette.accent)
             launcherStatusBtn.background = GlassTheme.innerDrawable(this, palette, 10f)
         }
@@ -1646,16 +1720,16 @@ class MainActivity : Activity(), LocationListener {
                 }
                 startActivity(intent)
             } catch (_: Exception) {
-                Toast.makeText(this, "Buka Pengaturan HP > Aplikasi Default > Aplikasi Beranda > pilih Haraya Dock", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "Open Android Settings > Default Apps > Home App > select Haraya Dock", Toast.LENGTH_LONG).show()
             }
         }
     }
 
     private fun cycleThemeMode() {
         themeMode = when (themeMode) {
-            ThemeMode.AUTO -> ThemeMode.DARK
-            ThemeMode.DARK -> ThemeMode.LIGHT
-            ThemeMode.LIGHT -> ThemeMode.AUTO
+            ThemeMode.LIGHT -> ThemeMode.DARK
+            ThemeMode.DARK -> ThemeMode.AUTO
+            ThemeMode.AUTO -> ThemeMode.LIGHT
         }
         getSharedPreferences("haraya_prefs", Context.MODE_PRIVATE)
             .edit().putString("theme_mode", themeMode.name).apply()
@@ -1664,9 +1738,9 @@ class MainActivity : Activity(), LocationListener {
     }
 
     private fun themeModeLabel(): String = when (themeMode) {
-        ThemeMode.AUTO -> "Otomatis"
-        ThemeMode.DARK -> "Gelap"
-        ThemeMode.LIGHT -> "Terang"
+        ThemeMode.AUTO -> "Auto"
+        ThemeMode.DARK -> "Dark"
+        ThemeMode.LIGHT -> "Light"
     }
 
     private fun openGoogleMapsLocationSharing() {
@@ -1681,9 +1755,9 @@ class MainActivity : Activity(), LocationListener {
             val coordLink = String.format(Locale.US, "https://maps.google.com/?q=%.5f,%.5f", currentLat, currentLon)
             val sendIntent = Intent(Intent.ACTION_SEND).apply {
                 type = "text/plain"
-                putExtra(Intent.EXTRA_TEXT, "Lokasi perjalanan saya saat ini: $coordLink")
+                putExtra(Intent.EXTRA_TEXT, "My live driving location: $coordLink")
             }
-            startActivity(Intent.createChooser(sendIntent, "Bagikan Lokasi Live"))
+            startActivity(Intent.createChooser(sendIntent, "Share Live Location"))
         }
     }
 
@@ -1694,7 +1768,7 @@ class MainActivity : Activity(), LocationListener {
             }
             startActivity(intent)
         } catch (_: Exception) {
-            Toast.makeText(this, "Aplikasi Telepon tidak ditemukan di perangkat ini", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Phone dialer app not found on this device", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -1707,7 +1781,7 @@ class MainActivity : Activity(), LocationListener {
                 return
             }
         }
-        Toast.makeText(this, "$label belum terpasang di perangkat ini", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "$label is not installed on this device", Toast.LENGTH_SHORT).show()
     }
 
     private fun isGpsProviderActive(): Boolean {
@@ -1735,11 +1809,11 @@ class MainActivity : Activity(), LocationListener {
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK
                 })
             }.onFailure {
-                Toast.makeText(this, "Aktifkan Lokasi / GPS melalui panel pengaturan cepat HP", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Enable Location / GPS in Android quick settings", Toast.LENGTH_SHORT).show()
             }
         } else {
             startLocationUpdatesIfPermitted()
-            Toast.makeText(this, "GPS Aktif (${String.format(Locale.US, "%.4f, %.4f", currentLat, currentLon)})", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "GPS Active (${String.format(Locale.US, "%.4f, %.4f", currentLat, currentLon)})", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -1749,27 +1823,67 @@ class MainActivity : Activity(), LocationListener {
         val gpsOk = isGpsProviderActive()
         val overlayPermOk = FloatingDockService.canDrawOverlays(this)
         val floatingActive = overlayPermOk && floatingDockEnabled
+        val adhanEnabled = adhanPlayerManager.isAdhanAlertEnabled()
+        val obdConnected = obdConnectionManager.getCurrentTelemetry().connected
 
         HarayaDialog.showCustomModal(
             context = this,
             palette = palette,
-            title = "Pengaturan Haraya Dock",
-            subtitle = "Konfigurasi keamanan servis, identitas kendaraan, & mode embedded",
+            title = "Haraya Dock Settings",
+            subtitle = "Configure OBD-II telemetry, vehicle identity, Adhan alerts, & embedded dock",
             contentBuilder = { container, dlg ->
                 val rows = listOf(
                     HarayaDialog.buildOptionRow(
                         context = this,
                         palette = palette,
-                        title = "Floating Dock Saat Buka Aplikasi Lain (Embedded Mode)",
+                        title = "OBD-II Bluetooth & Speedometer Source",
+                        subtitle = "${obdConnectionManager.getSpeedSourceLabel()} • Adapter: ${obdConnectionManager.getSavedDeviceName()}",
+                        badgeText = if (obdConnected) "OBD Active ✓" else "Configure",
+                        badgePositive = obdConnected
+                    ) {
+                        dlg.dismiss()
+                        openObdConfigurationModal()
+                    },
+                    HarayaDialog.buildOptionRow(
+                        context = this,
+                        palette = palette,
+                        title = "Vehicle Identity & Custom Car Image",
+                        subtitle = "${tripServiceManager.getVehicleName()} • ${tripServiceManager.getVehicleSubtitle()}" +
+                            if (tripServiceManager.hasCustomCarImage()) " • Custom Photo" else "",
+                        badgeText = "Edit Car",
+                        badgePositive = tripServiceManager.hasCustomCarImage()
+                    ) {
+                        dlg.dismiss()
+                        showEditVehicleDialog()
+                    },
+                    HarayaDialog.buildOptionRow(
+                        context = this,
+                        palette = palette,
+                        title = "Prayer Schedule & Adhan Audio Alert",
+                        subtitle = if (adhanEnabled) {
+                            "Plays rotational Adhan from Download/hisab when prayer time arrives"
+                        } else {
+                            "Adhan audio alert is muted (Tap to enable or test)"
+                        },
+                        badgeText = if (adhanEnabled) "Enabled ✓" else "Muted",
+                        badgePositive = adhanEnabled
+                    ) {
+                        dlg.dismiss()
+                        showAdhanSettingsSubModal()
+                    },
+                    HarayaDialog.buildOptionRow(
+                        context = this,
+                        palette = palette,
+                        title = "Floating Dock Overlay (AssistiveTouch Mode)",
                         subtitle = when {
-                            !overlayPermOk -> "Izinkan Tampil di Atas Aplikasi Lain agar Dock tetap terlihat saat buka YouTube/Maps"
-                            floatingDockEnabled -> "Dock Bawah tetap tampil saat membuka aplikasi eksternal (Ketuk untuk Nonaktifkan)"
-                            else -> "Floating Dock dinonaktifkan (Ketuk untuk Aktifkan)"
+                            !overlayPermOk -> "Grant 'Display over other apps' so the dock stays accessible in WhatsApp/YouTube"
+                            floatingDockEnabled -> "Active when opening external apps (Collapsible into draggable circle)"
+                            else -> "Floating Dock is disabled (Tap to enable)"
                         },
                         badgeText = when {
-                            !overlayPermOk -> "Izinkan"
-                            floatingDockEnabled -> "Aktif ✓"
-                            else -> "Nonaktif"
+                            !overlayPermOk -> "Grant"
+                            floatingDockEnabled -> "Active ✓"
+                            else -> "Disabled"
                         },
                         badgePositive = floatingActive
                     ) {
@@ -1790,9 +1904,9 @@ class MainActivity : Activity(), LocationListener {
                             getSharedPreferences("haraya_prefs", Context.MODE_PRIVATE)
                                 .edit().putBoolean("floating_dock_enabled", floatingDockEnabled).apply()
                             val msg = if (floatingDockEnabled) {
-                                "Floating Dock diaktifkan saat membuka aplikasi eksternal"
+                                "Floating Dock enabled when opening external apps"
                             } else {
-                                "Floating Dock dinonaktifkan"
+                                "Floating Dock disabled"
                             }
                             Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
                         }
@@ -1800,9 +1914,9 @@ class MainActivity : Activity(), LocationListener {
                     HarayaDialog.buildOptionRow(
                         context = this,
                         palette = palette,
-                        title = "PIN Keamanan Jadwal Servis",
-                        subtitle = "PIN diperlukan saat mengubah atau mereset pengingat servis (Standar: 0000)",
-                        badgeText = "Ubah PIN",
+                        title = "Service Schedule Security PIN",
+                        subtitle = "PIN protection required before editing or resetting maintenance items",
+                        badgeText = "Change PIN",
                         badgePositive = false
                     ) {
                         dlg.dismiss()
@@ -1811,20 +1925,9 @@ class MainActivity : Activity(), LocationListener {
                     HarayaDialog.buildOptionRow(
                         context = this,
                         palette = palette,
-                        title = "Identitas Kendaraan",
-                        subtitle = "${tripServiceManager.getVehicleName()} • ${tripServiceManager.getVehicleSubtitle()}",
-                        badgeText = "Edit Mobil",
-                        badgePositive = false
-                    ) {
-                        dlg.dismiss()
-                        showEditVehicleDialog()
-                    },
-                    HarayaDialog.buildOptionRow(
-                        context = this,
-                        palette = palette,
-                        title = "Akses Info Judul Lagu & Media",
-                        subtitle = if (notifOk) "Terhubung ke YouTube Music / Spotify" else "Izinkan akses agar judul lagu tampil otomatis",
-                        badgeText = if (notifOk) "Aktif ✓" else "Aktifkan",
+                        title = "Media & Song Title Notification Access",
+                        subtitle = if (notifOk) "Connected to YouTube Music / Spotify" else "Grant permission to show live song titles",
+                        badgeText = if (notifOk) "Active ✓" else "Enable",
                         badgePositive = notifOk
                     ) {
                         dlg.dismiss()
@@ -1837,9 +1940,9 @@ class MainActivity : Activity(), LocationListener {
                     HarayaDialog.buildOptionRow(
                         context = this,
                         palette = palette,
-                        title = "Layanan Lokasi & GPS",
-                        subtitle = if (gpsOk) "Sinyal lokasi aktif untuk Speedometer & Cuaca" else "Lokasi nonaktif • Ketuk untuk menyalakan GPS",
-                        badgeText = if (gpsOk) "GPS Aktif ✓" else "Nyalakan",
+                        title = "Location & GPS Services",
+                        subtitle = if (gpsOk) "GPS signal active for Speedometer, Prayer Times, & Weather" else "Location is off • Tap to enable GPS",
+                        badgeText = if (gpsOk) "GPS Active ✓" else "Turn On",
                         badgePositive = gpsOk
                     ) {
                         dlg.dismiss()
@@ -1852,24 +1955,13 @@ class MainActivity : Activity(), LocationListener {
                     HarayaDialog.buildOptionRow(
                         context = this,
                         palette = palette,
-                        title = "Aplikasi Beranda Utama (Default Launcher)",
-                        subtitle = if (launcherOk) "Haraya Dock sudah menjadi beranda utama" else "Jadikan Haraya Dock sebagai launcher utama head unit",
-                        badgeText = if (launcherOk) "Aktif ✓" else "Setel Beranda",
+                        title = "Default Home Launcher",
+                        subtitle = if (launcherOk) "Haraya Dock is set as your default launcher" else "Set Haraya Dock as the primary head-unit launcher",
+                        badgeText = if (launcherOk) "Active ✓" else "Set Home",
                         badgePositive = launcherOk
                     ) {
                         dlg.dismiss()
                         requestSetDefaultLauncher()
-                    },
-                    HarayaDialog.buildOptionRow(
-                        context = this,
-                        palette = palette,
-                        title = "Tata Letak Tampilan Beranda",
-                        subtitle = "Beralih ke tampilan Mode Klasik dengan Sidebar Kiri",
-                        badgeText = "Mode Klasik",
-                        badgePositive = false
-                    ) {
-                        dlg.dismiss()
-                        setHomeStyle(HomeStyle.CLASSIC_SILK)
                     }
                 )
                 for ((idx, r) in rows.withIndex()) {
@@ -1879,7 +1971,63 @@ class MainActivity : Activity(), LocationListener {
                 }
             },
             actions = listOf(
-                HarayaDialog.ActionButton("Tutup", isPrimary = true) { it.dismiss() }
+                HarayaDialog.ActionButton("Close", isPrimary = true) { it.dismiss() }
+            )
+        )
+    }
+
+    private fun showAdhanSettingsSubModal() {
+        val enabled = adhanPlayerManager.isAdhanAlertEnabled()
+        HarayaDialog.showCustomModal(
+            context = this,
+            palette = palette,
+            title = "Prayer Schedule & Adhan Audio",
+            subtitle = "Auto-updates every minute & whenever vehicle GPS moves > 1 km",
+            contentBuilder = { container, dlg ->
+                val toggleRow = HarayaDialog.buildOptionRow(
+                    context = this,
+                    palette = palette,
+                    title = "Automatic Adhan Popup & Audio",
+                    subtitle = "Rotates tracks from Download/hisab (Fajr tracks exclusively for Fajr)",
+                    badgeText = if (enabled) "Enabled ✓" else "Muted",
+                    badgePositive = enabled
+                ) {
+                    adhanPlayerManager.setAdhanAlertEnabled(!enabled)
+                    dlg.dismiss()
+                    showAdhanSettingsSubModal()
+                }
+                val testRegRow = HarayaDialog.buildOptionRow(
+                    context = this,
+                    palette = palette,
+                    title = "Preview Regular Adhan (Dhuhr / Asr / Maghrib / Isha)",
+                    subtitle = "Plays a random rotational non-Fajr Adhan with Stop & Close popup",
+                    badgeText = "Test Now",
+                    badgePositive = false
+                ) {
+                    dlg.dismiss()
+                    adhanPlayerManager.triggerAdhanWithPopup(this, palette, "Dhuhr", "12:00", isFajr = false)
+                }
+                val testFajrRow = HarayaDialog.buildOptionRow(
+                    context = this,
+                    palette = palette,
+                    title = "Preview Fajr Adhan (Subuh)",
+                    subtitle = "Plays a random rotational Fajr Adhan with Stop & Close popup",
+                    badgeText = "Test Fajr",
+                    badgePositive = false
+                ) {
+                    dlg.dismiss()
+                    adhanPlayerManager.triggerAdhanWithPopup(this, palette, "Fajr", "04:30", isFajr = true)
+                }
+                container.addView(toggleRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                    bottomMargin = dp(6f)
+                })
+                container.addView(testRegRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                    bottomMargin = dp(6f)
+                })
+                container.addView(testFajrRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            },
+            actions = listOf(
+                HarayaDialog.ActionButton("Close", isPrimary = true) { it.dismiss() }
             )
         )
     }
@@ -1891,13 +2039,13 @@ class MainActivity : Activity(), LocationListener {
         HarayaDialog.showCustomModal(
             context = this,
             palette = palette,
-            title = "Ubah PIN Jadwal Servis",
-            subtitle = "PIN melindungi jadwal servis agar tidak ter-reset secara tidak sengaja",
+            title = "Change Service Security PIN",
+            subtitle = "Protects maintenance schedules from accidental resets",
             contentBuilder = { container, _ ->
                 val oldEt = HarayaDialog.buildStyledInput(
                     context = this,
                     palette = palette,
-                    hintText = "PIN Lama (Standar: 0000)",
+                    hintText = "Current PIN",
                     inputTypeFlags = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD,
                     maxLength = 8,
                     centerText = true
@@ -1905,7 +2053,7 @@ class MainActivity : Activity(), LocationListener {
                 val newEt = HarayaDialog.buildStyledInput(
                     context = this,
                     palette = palette,
-                    hintText = "PIN Baru (4 - 8 angka)",
+                    hintText = "New PIN (4 - 8 digits)",
                     inputTypeFlags = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD,
                     maxLength = 8,
                     centerText = true
@@ -1918,28 +2066,18 @@ class MainActivity : Activity(), LocationListener {
                 })
             },
             actions = listOf(
-                HarayaDialog.ActionButton("Batal") { it.dismiss() },
-                HarayaDialog.ActionButton("Reset ke 0000") { dlg ->
-                    val oldPin = oldPinRef?.text?.toString().orEmpty()
-                    if (tripServiceManager.verifyServicePin(oldPin)) {
-                        tripServiceManager.setServicePin("0000")
-                        dlg.dismiss()
-                        Toast.makeText(this, "PIN dikembalikan ke 0000", Toast.LENGTH_SHORT).show()
-                    } else {
-                        Toast.makeText(this, "Masukkan PIN lama yang benar untuk mereset!", Toast.LENGTH_LONG).show()
-                    }
-                },
-                HarayaDialog.ActionButton("Simpan PIN", isPrimary = true) { dlg ->
+                HarayaDialog.ActionButton("Cancel") { it.dismiss() },
+                HarayaDialog.ActionButton("Save New PIN", isPrimary = true) { dlg ->
                     val oldPin = oldPinRef?.text?.toString().orEmpty()
                     val newPin = newPinRef?.text?.toString().orEmpty().trim()
                     if (!tripServiceManager.verifyServicePin(oldPin)) {
-                        Toast.makeText(this, "PIN Lama tidak sesuai!", Toast.LENGTH_LONG).show()
+                        Toast.makeText(this, "Current PIN is incorrect!", Toast.LENGTH_LONG).show()
                     } else if (newPin.length < 4) {
-                        Toast.makeText(this, "PIN Baru minimal terdiri dari 4 angka!", Toast.LENGTH_LONG).show()
+                        Toast.makeText(this, "New PIN must be at least 4 digits!", Toast.LENGTH_LONG).show()
                     } else {
                         tripServiceManager.setServicePin(newPin)
                         dlg.dismiss()
-                        Toast.makeText(this, "PIN Jadwal Servis berhasil diperbarui", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this, "Service security PIN updated", Toast.LENGTH_SHORT).show()
                     }
                 }
             )
@@ -1953,13 +2091,13 @@ class MainActivity : Activity(), LocationListener {
         HarayaDialog.showCustomModal(
             context = this,
             palette = palette,
-            title = "Identitas Kendaraan",
-            subtitle = "Ditampilkan di bawah ilustrasi mobil pada layar utama",
-            contentBuilder = { container, _ ->
+            title = "Vehicle Identity & Car Photo",
+            subtitle = "Customize vehicle name, license plate, and center car illustration",
+            contentBuilder = { container, dlg ->
                 val nameEt = HarayaDialog.buildStyledInput(
                     context = this,
                     palette = palette,
-                    hintText = "Nama Mobil (mis. Suzuki Baleno)",
+                    hintText = "Vehicle Name (e.g. Suzuki Baleno)",
                     initialText = tripServiceManager.getVehicleName(),
                     inputTypeFlags = InputType.TYPE_CLASS_TEXT,
                     maxLength = 40
@@ -1967,7 +2105,7 @@ class MainActivity : Activity(), LocationListener {
                 val subEt = HarayaDialog.buildStyledInput(
                     context = this,
                     palette = palette,
-                    hintText = "Tipe & Plat (mis. Hatchback • B 1353 EYX)",
+                    hintText = "Type & Plate (e.g. Hatchback • B 1353 EYX)",
                     initialText = tripServiceManager.getVehicleSubtitle(),
                     inputTypeFlags = InputType.TYPE_CLASS_TEXT,
                     maxLength = 50
@@ -1977,21 +2115,91 @@ class MainActivity : Activity(), LocationListener {
                 container.addView(nameEt, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
                 container.addView(subEt, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                     topMargin = dp(8f)
+                    bottomMargin = dp(8f)
                 })
-            },
-            actions = listOf(
-                HarayaDialog.ActionButton("Batal") { it.dismiss() },
-                HarayaDialog.ActionButton("Simpan", isPrimary = true) { dlg ->
+
+                val pickImgRow = HarayaDialog.buildOptionRow(
+                    context = this,
+                    palette = palette,
+                    title = "Change Car Image from Gallery",
+                    subtitle = if (tripServiceManager.hasCustomCarImage()) {
+                        "Custom car image active (PNG with transparent background recommended)"
+                    } else {
+                        "Using default Suzuki Baleno illustration (Tap to select PNG/JPG)"
+                    },
+                    badgeText = "Choose Photo",
+                    badgePositive = tripServiceManager.hasCustomCarImage()
+                ) {
+                    // Save any typed name/plate before opening gallery picker
                     tripServiceManager.setVehicleIdentity(
                         nameRef?.text?.toString().orEmpty(),
                         subRef?.text?.toString().orEmpty()
                     )
                     carCockpitView.refreshVehicleIdentity()
                     dlg.dismiss()
-                    Toast.makeText(this, "Identitas kendaraan diperbarui", Toast.LENGTH_SHORT).show()
+                    launchCarImagePicker()
+                }
+                container.addView(pickImgRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+
+                if (tripServiceManager.hasCustomCarImage()) {
+                    val resetImgRow = HarayaDialog.buildOptionRow(
+                        context = this,
+                        palette = palette,
+                        title = "Restore Default Car Illustration",
+                        subtitle = "Revert to built-in Suzuki Baleno image",
+                        badgeText = "Reset Image",
+                        badgePositive = false
+                    ) {
+                        tripServiceManager.resetCustomCarImage()
+                        carCockpitView.refreshVehicleIdentity()
+                        dlg.dismiss()
+                        Toast.makeText(this, "Restored default car illustration", Toast.LENGTH_SHORT).show()
+                    }
+                    container.addView(resetImgRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                        topMargin = dp(6f)
+                    })
+                }
+            },
+            actions = listOf(
+                HarayaDialog.ActionButton("Cancel") { it.dismiss() },
+                HarayaDialog.ActionButton("Save", isPrimary = true) { dlg ->
+                    tripServiceManager.setVehicleIdentity(
+                        nameRef?.text?.toString().orEmpty(),
+                        subRef?.text?.toString().orEmpty()
+                    )
+                    carCockpitView.refreshVehicleIdentity()
+                    dlg.dismiss()
+                    Toast.makeText(this, "Vehicle identity updated", Toast.LENGTH_SHORT).show()
                 }
             )
         )
+    }
+
+    private fun launchCarImagePicker() {
+        runCatching {
+            val pickIntent = Intent(Intent.ACTION_GET_CONTENT).apply {
+                type = "image/*"
+                addCategory(Intent.CATEGORY_OPENABLE)
+            }
+            startActivityForResult(Intent.createChooser(pickIntent, "Select Car Image"), REQUEST_CODE_PICK_CAR_IMAGE)
+        }.onFailure {
+            Toast.makeText(this, "Unable to open image gallery on this device", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_CODE_PICK_CAR_IMAGE && resultCode == RESULT_OK) {
+            val uri = data?.data ?: return
+            val ok = tripServiceManager.saveCustomCarImageFromUri(uri)
+            if (ok) {
+                carCockpitView.refreshVehicleIdentity()
+                Toast.makeText(this, "Custom car image applied!", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, "Failed to load selected image", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     private fun requestLocationPermissionIfNeeded() {
@@ -2004,7 +2212,7 @@ class MainActivity : Activity(), LocationListener {
                         Manifest.permission.ACCESS_FINE_LOCATION,
                         Manifest.permission.ACCESS_COARSE_LOCATION
                     ),
-                    101
+                    REQUEST_CODE_LOCATION
                 )
                 return
             }
@@ -2014,8 +2222,10 @@ class MainActivity : Activity(), LocationListener {
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == 101 && grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+        if (requestCode == REQUEST_CODE_LOCATION && grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
             startLocationUpdatesIfPermitted()
+        } else if (requestCode == REQUEST_CODE_BLUETOOTH && grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            openObdConfigurationModal()
         }
     }
 
@@ -2023,8 +2233,8 @@ class MainActivity : Activity(), LocationListener {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
             checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED
         ) {
-            locTitleTv.text = "Izin Lokasi Belum Aktif"
-            locSubTv.text = "Ketuk untuk izinkan GPS & Cuaca"
+            locTitleTv.text = "Location Permission Needed"
+            locSubTv.text = "Tap to allow GPS & Weather"
             return
         }
 
@@ -2049,7 +2259,7 @@ class MainActivity : Activity(), LocationListener {
             if (bestLoc != null) {
                 onLocationChanged(bestLoc)
             } else {
-                locSubTv.text = "Mencari sinyal GPS/Jaringan..."
+                locSubTv.text = "Acquiring GPS/Network signal..."
             }
 
             if (lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
@@ -2066,16 +2276,18 @@ class MainActivity : Activity(), LocationListener {
         currentLat = location.latitude
         currentLon = location.longitude
 
-        currentKmh = if (location.hasSpeed()) (location.speed * 3.6f).roundToInt() else 0
-        speedGauge.setSpeed(currentKmh)
-        obdSpeedGauge.setSpeed(currentKmh)
-        carCockpitView.updateSpeed(currentKmh)
-        FloatingDockService.notifyStateUpdated(this, currentKmh, palette.isDark)
+        val gpsSpeedKmh = if (location.hasSpeed()) (location.speed * 3.6f).roundToInt() else 0
+        obdConnectionManager.updateGpsSpeed(gpsSpeedKmh)
 
         tripServiceManager.onLocationUpdate(location)
         carCockpitView.refreshTripAndServices()
 
-        val providerLabel = if (location.provider == LocationManager.GPS_PROVIDER) "GPS Akurat" else "Jaringan"
+        // Immediately recalculate Prayer Schedule if the car has moved >= 0.01 deg (~1.1 km)
+        if (abs(currentLat - lastPrayerCalcLat) >= 0.01 || abs(currentLon - lastPrayerCalcLon) >= 0.01) {
+            refreshClockAndSchedule()
+        }
+
+        val providerLabel = if (location.provider == LocationManager.GPS_PROVIDER) "Accurate GPS" else "Network"
         val coordSub = String.format(Locale.US, "%.4f, %.4f • %s", currentLat, currentLon, providerLabel)
         locSubTv.text = coordSub
         mapCanvas.updateLocation(currentLat, currentLon, currentStreetLabel)
@@ -2091,7 +2303,7 @@ class MainActivity : Activity(), LocationListener {
     }
 
     private fun reverseGeocodeAsync(lat: Double, lon: Double) {
-        if (kotlin.math.abs(lat - lastGeocodedLat) < 0.0008 && kotlin.math.abs(lon - lastGeocodedLon) < 0.0008) {
+        if (abs(lat - lastGeocodedLat) < 0.0008 && abs(lon - lastGeocodedLon) < 0.0008) {
             return
         }
         lastGeocodedLat = lat
@@ -2100,12 +2312,12 @@ class MainActivity : Activity(), LocationListener {
         Thread {
             try {
                 if (Geocoder.isPresent()) {
-                    val geocoder = Geocoder(this, Locale("id", "ID"))
+                    val geocoder = Geocoder(this, Locale.US)
                     @Suppress("DEPRECATION")
                     val list = geocoder.getFromLocation(lat, lon, 1)
                     if (!list.isNullOrEmpty()) {
                         val addr = list[0]
-                        val city = addr.subAdminArea ?: addr.locality ?: addr.adminArea ?: "Lokasi Terdeteksi"
+                        val city = addr.subAdminArea ?: addr.locality ?: addr.adminArea ?: "Location Detected"
                         val district = addr.locality ?: addr.subLocality ?: ""
                         val title = if (district.isNotEmpty() && district != city) "$district, $city" else city
 

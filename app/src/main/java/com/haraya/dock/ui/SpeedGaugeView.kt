@@ -109,10 +109,10 @@ class SpeedGaugeView(context: Context) : View(context) {
         numberPaint.textSize = minDim * 0.36f
         canvas.drawText(speedKmh.toString(), cx, cy + minDim * 0.09f, numberPaint)
 
-        // Label km/j
+        // Label km/h
         unitPaint.color = palette.textSecondary
         unitPaint.textSize = minDim * 0.105f
-        canvas.drawText("km/j", cx, cy + minDim * 0.26f, unitPaint)
+        canvas.drawText("km/h", cx, cy + minDim * 0.26f, unitPaint)
     }
 }
 

@@ -27,6 +27,7 @@ import java.util.Locale
 class CarCockpitView(
     context: Context,
     private val tripServiceManager: TripAndServiceManager,
+    private val adhanPlayerManager: AdhanPlayerManager,
     private val onSwitchThemeMode: (ThemeMode) -> Unit,
     private val onSwitchToClassicLayout: () -> Unit,
     private val onSelectHomeStage: () -> Unit,
@@ -38,6 +39,7 @@ class CarCockpitView(
     private val onOpenYouTube: () -> Unit,
     private val onOpenPhone: () -> Unit,
     private val onOpenObdScreen: () -> Unit,
+    private val onOpenObdSettingsModal: () -> Unit,
     private val onOpenSettingsDialog: () -> Unit,
     private val onOpenAppsScreen: () -> Unit
 ) : LinearLayout(context) {
@@ -50,13 +52,14 @@ class CarCockpitView(
     }
 
     private var palette: GlassPalette = GlassTheme.Dark
+    private var currentThemeMode: ThemeMode = ThemeMode.AUTO
     private var activeStage: CockpitStage = CockpitStage.HOME
     private var quoteIdx: Int = 0
     private var seatbeltBannerDismissed: Boolean = false
     private var isGpsActive: Boolean = false
     private var optimisticPlayingToggle: Boolean? = null
 
-    // Stage Host Frame (di antara Top Bar dan Bottom Dock)
+    // Stage Host Frame (between Top Bar and Bottom Dock)
     private val stageHostFrame: FrameLayout
     private val mainColumnsRow: LinearLayout
 
@@ -68,27 +71,30 @@ class CarCockpitView(
     private val embeddedMapSubTv: TextView
     private val embeddedMapShareBtn: TextView
     private val embeddedMapExternalBtn: TextView
-    private val embeddedMapZoomInBtn: TextView
-    private val embeddedMapZoomOutBtn: TextView
-    private val embeddedMapRecenterBtn: TextView
+    private val embeddedMapZoomInBtn: FrameLayout
+    private val embeddedMapZoomInIcon: VectorIconView
+    private val embeddedMapZoomOutBtn: FrameLayout
+    private val embeddedMapZoomOutIcon: VectorIconView
+    private val embeddedMapRecenterBtn: FrameLayout
+    private val embeddedMapRecenterIcon: VectorIconView
     private val embeddedMapBackHomeBtn: TextView
 
-    // Referensi tampilan OBD & Apps Drawer yang di-embed ke dalam stageHostFrame
+    // Embedded OBD & Apps Drawer references
     private var embeddedObdView: View? = null
     private var embeddedAppsView: View? = null
 
     // Top Bar
     private val topBarLayout: LinearLayout
-    private val modeTerangBtn: TextView
-    private val modeGelapBtn: TextView
-    private val modeAutoBtn: TextView
+    private val themeCycleBtn: FrameLayout
+    private val themeCycleIcon: VectorIconView
     private val layoutSwitchBtn: TextView
     private val topBrandTitleTv: TextView
     private val topBrandSubTv: TextView
     private val gpsPillTv: TextView
-    private val settingsTopBtn: TextView
+    private val settingsTopBtn: FrameLayout
+    private val settingsTopIcon: VectorIconView
 
-    // Left Column: (1) Peta Live + (2) Jadwal Sholat + (3) Kutipan Ayat/Doa Harian
+    // Left Column: (1) Live Map + (2) Prayer Times + (3) Daily Verse & Prayer
     private val mapCard: GlassCardView
     private val mapHeaderTv: TextView
     private val mapShareBtn: TextView
@@ -109,7 +115,7 @@ class CarCockpitView(
     private val quoteBodyTv: TextView
     private val quoteRefTv: TextView
 
-    // Center Column: Alert Banner + Arc Speedometer + Car Image + Media Control
+    // Center Column: Alert Banner + Arc Speedometer (with Mini RPM & Gear) + Car Image + Media Control
     private val alertBannerBox: LinearLayout
     private val alertBannerTitleTv: TextView
     private val alertBannerSubTv: TextView
@@ -132,7 +138,7 @@ class CarCockpitView(
     private val mediaPlayIcon: VectorIconView
     private val mediaNextIcon: VectorIconView
 
-    // Right Column: (1) Ringkasan & Riwayat Perjalanan + (2) Jadwal Servis (PIN) + (3) Cuaca
+    // Right Column: (1) Trip Summary & History + (2) Service Schedule (PIN Locked) + (3) Weather
     private val tripHistoryCard: GlassCardView
     private val tripHistoryHeaderTv: TextView
     private val tripHistoryBadgeTv: TextView
@@ -146,6 +152,8 @@ class CarCockpitView(
 
     private val serviceCard: GlassCardView
     private val serviceHeaderTv: TextView
+    private val servicePinBadgeBox: LinearLayout
+    private val servicePinLockIcon: VectorIconView
     private val servicePinBadgeTv: TextView
     private val serviceItemBoxes = mutableListOf<LinearLayout>()
     private val serviceItemIcons = mutableListOf<VectorIconView>()
@@ -159,7 +167,7 @@ class CarCockpitView(
     private val weatherTempTv: TextView
     private val weatherDescTv: TextView
 
-    // Bottom Dock Bar
+    // Bottom Dock Bar (6 Tabs: HOME, MAP, MEDIA, PHONE, OBD & ENGINE, APPS)
     private val bottomDockCard: GlassCardView
     private val dockTabBoxes = mutableListOf<LinearLayout>()
     private val dockTabIcons = mutableListOf<VectorIconView>()
@@ -182,23 +190,26 @@ class CarCockpitView(
             gravity = Gravity.CENTER_VERTICAL
         }
 
-        val themeSegmentBox = LinearLayout(context).apply {
-            orientation = HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
+        // Single Theme Mode Cycle Button: Sun (Light) -> Moon (Dark) -> A (Auto)
+        themeCycleIcon = VectorIconView(context, VectorIconView.IconType.AUTO_A)
+        themeCycleBtn = FrameLayout(context).apply {
+            addView(themeCycleIcon, FrameLayout.LayoutParams(dp(15f), dp(15f), Gravity.CENTER))
+            setOnClickListener {
+                val nextMode = when (currentThemeMode) {
+                    ThemeMode.LIGHT -> ThemeMode.DARK
+                    ThemeMode.DARK -> ThemeMode.AUTO
+                    ThemeMode.AUTO -> ThemeMode.LIGHT
+                }
+                onSwitchThemeMode(nextMode)
+            }
         }
-        modeTerangBtn = buildModePill("Terang") { onSwitchThemeMode(ThemeMode.LIGHT) }
-        modeGelapBtn = buildModePill("Gelap") { onSwitchThemeMode(ThemeMode.DARK) }
-        modeAutoBtn = buildModePill("Auto") { onSwitchThemeMode(ThemeMode.AUTO) }
-        themeSegmentBox.addView(modeTerangBtn)
-        themeSegmentBox.addView(modeGelapBtn, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { leftMargin = dp(4f) })
-        themeSegmentBox.addView(modeAutoBtn, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { leftMargin = dp(4f) })
 
         layoutSwitchBtn = TextView(context).apply {
-            text = "Mode Klasik"
+            text = "Classic"
             textSize = 10f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
             includeFontPadding = false
-            setPadding(dp(10f), dp(4f), dp(10f), dp(4f))
+            setPadding(dp(10f), dp(5f), dp(10f), dp(5f))
             setOnClickListener { onSwitchToClassicLayout() }
         }
 
@@ -206,9 +217,9 @@ class CarCockpitView(
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        leftTopGroup.addView(themeSegmentBox)
+        leftTopGroup.addView(themeCycleBtn, LayoutParams(dp(30f), dp(26f)))
         leftTopGroup.addView(layoutSwitchBtn, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-            leftMargin = dp(8f)
+            leftMargin = dp(6f)
         })
 
         val brandCenterCol = LinearLayout(context).apply {
@@ -237,23 +248,23 @@ class CarCockpitView(
             gravity = Gravity.END or Gravity.CENTER_VERTICAL
         }
         gpsPillTv = TextView(context).apply {
-            text = "● GPS Aktif"
+            text = "● GPS Active"
             textSize = 10f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
             includeFontPadding = false
-            setPadding(dp(10f), dp(4f), dp(10f), dp(4f))
+            setPadding(dp(10f), dp(5f), dp(10f), dp(5f))
             setOnClickListener { onGpsPillClicked() }
         }
-        settingsTopBtn = TextView(context).apply {
-            text = "Setelan"
-            textSize = 10f
-            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-            includeFontPadding = false
-            setPadding(dp(10f), dp(4f), dp(10f), dp(4f))
+
+        // Settings Icon-Only Button
+        settingsTopIcon = VectorIconView(context, VectorIconView.IconType.GEAR_COG)
+        settingsTopBtn = FrameLayout(context).apply {
+            addView(settingsTopIcon, FrameLayout.LayoutParams(dp(15f), dp(15f), Gravity.CENTER))
             setOnClickListener { onOpenSettingsDialog() }
         }
+
         rightTopGroup.addView(gpsPillTv)
-        rightTopGroup.addView(settingsTopBtn, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+        rightTopGroup.addView(settingsTopBtn, LayoutParams(dp(30f), dp(26f)).apply {
             leftMargin = dp(6f)
         })
 
@@ -277,12 +288,12 @@ class CarCockpitView(
         val cardPadH = dp(12f)
         val cardPadV = dp(8f)
 
-        // --- KOLOM KIRI: (1) Peta Live + (2) Jadwal Sholat + (3) Kutipan Ayat/Doa ---
+        // --- LEFT COLUMN: (1) Live Map + (2) Prayer Times + (3) Daily Verse & Prayer ---
         val leftCol = LinearLayout(context).apply {
             orientation = VERTICAL
         }
 
-        // 2A. Kartu Peta & Share Lokasi
+        // 2A. Live Map & Location Card
         mapCard = GlassCardView(context)
         mapCard.setPadding(cardPadH, cardPadV, cardPadH, cardPadV)
         val mapCol = LinearLayout(context).apply { orientation = VERTICAL }
@@ -291,7 +302,7 @@ class CarCockpitView(
             gravity = Gravity.CENTER_VERTICAL
         }
         mapHeaderTv = TextView(context).apply {
-            text = "PETA & LOKASI"
+            text = "MAP & LOCATION"
             textSize = 9.5f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
             letterSpacing = 0.04f
@@ -300,7 +311,7 @@ class CarCockpitView(
             ellipsize = TextUtils.TruncateAt.END
         }
         mapShareBtn = TextView(context).apply {
-            text = "Bagikan Live"
+            text = "Share Live"
             textSize = 8.5f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
             includeFontPadding = false
@@ -326,7 +337,7 @@ class CarCockpitView(
         })
 
         mapFooterTv = TextView(context).apply {
-            text = "Peta Live OpenStreetMap • Ketuk peta untuk navigasi"
+            text = "Live OpenStreetMap • Tap map to expand"
             textSize = 8.5f
             includeFontPadding = false
             maxLines = 1
@@ -335,9 +346,17 @@ class CarCockpitView(
         mapCol.addView(mapFooterTv)
         mapCard.addView(mapCol, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
-        // 2B. Kartu Jadwal Sholat 5 Waktu (Bersih & Rapi)
+        // 2B. 5 Daily Prayer Times Card (Auto-updates on time & GPS travel)
         prayerCard = GlassCardView(context)
         prayerCard.setPadding(cardPadH, dp(7f), cardPadH, dp(7f))
+        prayerCard.setOnClickListener {
+            if (adhanPlayerManager.isPlayingAdhan) {
+                adhanPlayerManager.stopAdhanPlayback()
+                Toast.makeText(context, "Adhan playback stopped", Toast.LENGTH_SHORT).show()
+            } else {
+                showAdhanPreviewDialog()
+            }
+        }
         val prayerCol = LinearLayout(context).apply {
             orientation = VERTICAL
             gravity = Gravity.CENTER_VERTICAL
@@ -347,7 +366,7 @@ class CarCockpitView(
             gravity = Gravity.CENTER_VERTICAL
         }
         prayerHeaderTitleTv = TextView(context).apply {
-            text = "JADWAL SHOLAT"
+            text = "PRAYER TIMES"
             textSize = 9f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
             letterSpacing = 0.04f
@@ -367,7 +386,7 @@ class CarCockpitView(
         })
 
         val prayerStrip = LinearLayout(context).apply { orientation = HORIZONTAL }
-        val pNames = listOf("Subuh", "Dzuhur", "Ashar", "Maghrib", "Isya")
+        val pNames = listOf("Fajr", "Dhuhr", "Asr", "Maghrib", "Isha")
         for (i in pNames.indices) {
             val slot = LinearLayout(context).apply {
                 orientation = VERTICAL
@@ -402,7 +421,7 @@ class CarCockpitView(
         prayerCol.addView(prayerStrip, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         prayerCard.addView(prayerCol, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
-        // 2C. Kartu Kutipan Ayat / Doa Muslim (Di bawah Jadwal Sholat)
+        // 2C. Daily Verse & Prayer Card
         quoteCard = GlassCardView(context)
         quoteCard.setPadding(cardPadH, dp(7f), cardPadH, dp(7f))
         quoteCard.setOnClickListener {
@@ -418,7 +437,7 @@ class CarCockpitView(
             gravity = Gravity.CENTER_VERTICAL
         }
         quoteHeaderTitleTv = TextView(context).apply {
-            text = "KUTIPAN & DOA HARIAN"
+            text = "DAILY VERSE & PRAYER"
             textSize = 9f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
             letterSpacing = 0.04f
@@ -461,7 +480,7 @@ class CarCockpitView(
             rightMargin = dp(8f)
         })
 
-        // --- KOLOM TENGAH (Banner + Busur Speedometer + Suzuki Baleno + Kontrol Media) ---
+        // --- CENTER COLUMN (Alert Banner + Speedometer Arc with Mini RPM/Gear + Vehicle Image + Media Control) ---
         val centerCol = LinearLayout(context).apply {
             orientation = VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
@@ -474,13 +493,13 @@ class CarCockpitView(
         }
         val alertTextCol = LinearLayout(context).apply { orientation = VERTICAL }
         alertBannerTitleTv = TextView(context).apply {
-            text = "Kenakan Sabuk Pengaman"
+            text = "Fasten Your Seatbelt"
             textSize = 9.5f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
             includeFontPadding = false
         }
         alertBannerSubTv = TextView(context).apply {
-            text = "Pastikan sabuk pengaman terpasang demi keselamatan perjalanan"
+            text = "Please fasten your seatbelt for a safe journey"
             textSize = 8.5f
             includeFontPadding = false
             maxLines = 1
@@ -490,7 +509,7 @@ class CarCockpitView(
         alertTextCol.addView(alertBannerSubTv)
 
         alertBannerCloseTv = TextView(context).apply {
-            text = "Tutup"
+            text = "Dismiss"
             textSize = 9f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
             includeFontPadding = false
@@ -506,9 +525,11 @@ class CarCockpitView(
             bottomMargin = dp(4f)
         })
 
-        // Area Instrumen Tengah: Busur Speedometer di atas, Mobil di separuh bawah
+        // Center Instrument Stage: Speedometer Arc + Mini RPM/Gear at top, Vehicle Image at bottom
         val centerStageFrame = FrameLayout(context)
-        speedArcView = CenterSpeedArcView(context)
+        speedArcView = CenterSpeedArcView(context).apply {
+            setOnClickListener { onOpenObdSettingsModal() }
+        }
         centerStageFrame.addView(
             speedArcView,
             FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.TOP)
@@ -521,7 +542,7 @@ class CarCockpitView(
         }
         centerStageFrame.addView(
             carImageView,
-            FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(105f), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
+            FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(100f), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
                 leftMargin = dp(28f)
                 rightMargin = dp(28f)
                 bottomMargin = dp(2f)
@@ -556,7 +577,7 @@ class CarCockpitView(
             bottomMargin = dp(6f)
         })
 
-        // Kartu Kontrol Media di Bawah Mobil
+        // Media Control Card Below Vehicle
         mediaCard = GlassCardView(context)
         mediaCard.setPadding(dp(12f), dp(8f), dp(12f), dp(8f))
         val mediaRow = LinearLayout(context).apply {
@@ -574,7 +595,7 @@ class CarCockpitView(
             }
         }
         mediaTitleTv = TextView(context).apply {
-            text = "Kontrol Media"
+            text = "Media Control"
             textSize = 11f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
             includeFontPadding = false
@@ -582,7 +603,7 @@ class CarCockpitView(
             ellipsize = TextUtils.TruncateAt.END
         }
         mediaSubTv = TextView(context).apply {
-            text = "Ketuk untuk membuka YouTube Music"
+            text = "Tap to open YouTube Music"
             textSize = 8.5f
             includeFontPadding = false
             maxLines = 1
@@ -634,12 +655,12 @@ class CarCockpitView(
             rightMargin = dp(8f)
         })
 
-        // --- KOLOM KANAN: (1) Ringkasan & Riwayat Perjalanan + (2) Jadwal Servis (PIN) + (3) Cuaca ---
+        // --- RIGHT COLUMN: (1) Trip History + (2) Service Schedule (PIN Locked) + (3) Weather ---
         val rightCol = LinearLayout(context).apply {
             orientation = VERTICAL
         }
 
-        // 3A. Kartu Ringkasan & Riwayat Perjalanan (Ketuk untuk Popup Riwayat Lengkap)
+        // 3A. Trip Summary & History Card (Tap for Full Trip History Popup)
         tripHistoryCard = GlassCardView(context)
         tripHistoryCard.setPadding(cardPadH, dp(7f), cardPadH, dp(7f))
         tripHistoryCard.setOnClickListener {
@@ -654,14 +675,14 @@ class CarCockpitView(
             gravity = Gravity.CENTER_VERTICAL
         }
         tripHistoryHeaderTv = TextView(context).apply {
-            text = "RIWAYAT PERJALANAN"
+            text = "TRIP HISTORY"
             textSize = 9f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
             letterSpacing = 0.04f
             includeFontPadding = false
         }
         tripHistoryBadgeTv = TextView(context).apply {
-            text = "0/5 • Detail"
+            text = "0/5 • Details"
             textSize = 8.5f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
             fontFeatureSettings = "tnum"
@@ -695,16 +716,16 @@ class CarCockpitView(
             tripMetricsRow.addView(box, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             return vTv to uTv
         }
-        val m1 = buildTripMetric("0,0", "km")
-        val m2 = buildTripMetric("00:00", "jam : mnt")
-        val m3 = buildTripMetric("0", "km/j rata-rata")
+        val m1 = buildTripMetric("0.0", "km")
+        val m2 = buildTripMetric("00:00", "hr : min")
+        val m3 = buildTripMetric("0", "km/h avg")
         tripDistValTv = m1.first; tripDistSubTv = m1.second
         tripDurValTv = m2.first; tripDurSubTv = m2.second
         tripAvgValTv = m3.first; tripAvgSubTv = m3.second
         tripCol.addView(tripMetricsRow)
 
         tripFootnoteTv = TextView(context).apply {
-            text = "Ketuk untuk melihat daftar Riwayat Perjalanan"
+            text = "Tap to view saved Trip History"
             textSize = 8f
             includeFontPadding = false
             maxLines = 1
@@ -715,7 +736,7 @@ class CarCockpitView(
         })
         tripHistoryCard.addView(tripCol, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
-        // 3B. Kartu Jadwal Servis (Grid 2x2 Horizontal per Item agar 100% Terbaca tanpa terpotong)
+        // 3B. Service Schedule Card (2x2 Horizontal Grid, PIN hidden behind Lock badge)
         serviceCard = GlassCardView(context)
         serviceCard.setPadding(cardPadH, dp(7f), cardPadH, dp(7f))
         val svcCol = LinearLayout(context).apply { orientation = VERTICAL }
@@ -724,20 +745,30 @@ class CarCockpitView(
             gravity = Gravity.CENTER_VERTICAL
         }
         serviceHeaderTv = TextView(context).apply {
-            text = "JADWAL SERVIS"
+            text = "SERVICE SCHEDULE"
             textSize = 9f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
             letterSpacing = 0.04f
             includeFontPadding = false
         }
+        servicePinBadgeBox = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        servicePinLockIcon = VectorIconView(context, VectorIconView.IconType.LOCK)
         servicePinBadgeTv = TextView(context).apply {
-            text = "PIN 0000"
+            text = "PIN Locked"
             textSize = 8f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
             includeFontPadding = false
         }
+        servicePinBadgeBox.addView(servicePinLockIcon, LayoutParams(dp(10f), dp(10f)).apply {
+            rightMargin = dp(3f)
+        })
+        servicePinBadgeBox.addView(servicePinBadgeTv)
+
         svcHeadRow.addView(serviceHeaderTv, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        svcHeadRow.addView(servicePinBadgeTv)
+        svcHeadRow.addView(servicePinBadgeBox)
         svcCol.addView(svcHeadRow, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
             bottomMargin = dp(5f)
         })
@@ -752,7 +783,6 @@ class CarCockpitView(
             val rBox = LinearLayout(context).apply { orientation = HORIZONTAL }
             for (colIdx in 0..1) {
                 val idx = rowIdx * 2 + colIdx
-                // Layout Horizontal: Ikon di kiri, Judul + Sisa KM/Hari di kanan (bebas kepotong!)
                 val itemBox = LinearLayout(context).apply {
                     orientation = HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
@@ -804,7 +834,7 @@ class CarCockpitView(
         }
         serviceCard.addView(svcCol, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
-        // 3C. Kartu Cuaca Open-Meteo (Horizontal sejajar agar kondisi cuaca 100% terbaca utuh)
+        // 3C. Weather Card (Open-Meteo)
         weatherCard = GlassCardView(context)
         weatherCard.setPadding(cardPadH, dp(6f), cardPadH, dp(6f))
         val wCol = LinearLayout(context).apply {
@@ -816,7 +846,7 @@ class CarCockpitView(
             gravity = Gravity.CENTER_VERTICAL
         }
         weatherHeaderTv = TextView(context).apply {
-            text = "CUACA"
+            text = "WEATHER"
             textSize = 9f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
             letterSpacing = 0.04f
@@ -850,7 +880,7 @@ class CarCockpitView(
             includeFontPadding = false
         }
         weatherDescTv = TextView(context).apply {
-            text = "Cerah Berawan"
+            text = "Partly Cloudy"
             textSize = 10f
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
             includeFontPadding = false
@@ -876,7 +906,7 @@ class CarCockpitView(
         )
 
         // ==========================================
-        // 2D. EMBEDDED INTERACTIVE MAP STAGE (Di dalam Dock)
+        // 2D. EMBEDDED INTERACTIVE MAP STAGE (In-Cockpit)
         // ==========================================
         embeddedMapCard = GlassCardView(context).apply {
             setPadding(dp(8f), dp(8f), dp(8f), dp(8f))
@@ -891,7 +921,7 @@ class CarCockpitView(
             FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         )
 
-        // Top Floating Overlay Bar di dalam Peta Embedded
+        // Top Floating Overlay Bar inside Embedded Map
         embeddedMapHeaderBar = LinearLayout(context).apply {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -899,7 +929,7 @@ class CarCockpitView(
         }
         val embLocCol = LinearLayout(context).apply { orientation = VERTICAL }
         embeddedMapTitleTv = TextView(context).apply {
-            text = "PETA NAVIGASI INTERAKTIF"
+            text = "INTERACTIVE NAVIGATION MAP"
             textSize = 11.5f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
             includeFontPadding = false
@@ -907,7 +937,7 @@ class CarCockpitView(
             ellipsize = TextUtils.TruncateAt.END
         }
         embeddedMapSubTv = TextView(context).apply {
-            text = "Geser peta dengan jari • Gunakan tombol +/- untuk zoom"
+            text = "Drag map with finger • Use corner buttons to zoom or recenter"
             textSize = 9.5f
             includeFontPadding = false
             maxLines = 1
@@ -922,7 +952,7 @@ class CarCockpitView(
         })
 
         embeddedMapShareBtn = TextView(context).apply {
-            text = "Bagikan Lokasi Live"
+            text = "Share Live Location"
             textSize = 9.5f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
             includeFontPadding = false
@@ -930,7 +960,7 @@ class CarCockpitView(
             setOnClickListener { onShareLiveLocation() }
         }
         embeddedMapExternalBtn = TextView(context).apply {
-            text = "Buka Google Maps"
+            text = "Open Google Maps"
             textSize = 9.5f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
             includeFontPadding = false
@@ -938,7 +968,7 @@ class CarCockpitView(
             setOnClickListener { onOpenExternalMaps() }
         }
         embeddedMapBackHomeBtn = TextView(context).apply {
-            text = "Kembali"
+            text = "Back"
             textSize = 9.5f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
             includeFontPadding = false
@@ -962,38 +992,39 @@ class CarCockpitView(
             }
         )
 
-        // Tombol Zoom In (+), Zoom Out (-), dan Fokus Mobil (◎) di Kanan Bawah Peta
+        // Icon-Only Map Controls: Zoom In (Magnifying Glass +), Zoom Out (Magnifying Glass -), Recenter (Target Dot)
         val mapControlsCol = LinearLayout(context).apply {
             orientation = VERTICAL
             gravity = Gravity.END
         }
-        fun buildMapFloatingBtn(label: String, onClick: () -> Unit): TextView {
-            return TextView(context).apply {
-                text = label
-                textSize = 11f
-                typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-                gravity = Gravity.CENTER
-                includeFontPadding = false
-                setPadding(dp(12f), dp(8f), dp(12f), dp(8f))
+        fun buildMapFloatingIconBtn(iconType: VectorIconView.IconType, onClick: () -> Unit): Pair<FrameLayout, VectorIconView> {
+            val ic = VectorIconView(context, iconType)
+            val box = FrameLayout(context).apply {
+                addView(ic, FrameLayout.LayoutParams(dp(18f), dp(18f), Gravity.CENTER))
                 setOnClickListener { onClick() }
             }
+            return box to ic
         }
-        embeddedMapZoomInBtn = buildMapFloatingBtn("＋ Perbesar") {
+        val zoomInPair = buildMapFloatingIconBtn(VectorIconView.IconType.ZOOM_IN) {
             embeddedMapCanvas.zoomIn()
         }
-        embeddedMapZoomOutBtn = buildMapFloatingBtn("－ Perkecil") {
+        val zoomOutPair = buildMapFloatingIconBtn(VectorIconView.IconType.ZOOM_OUT) {
             embeddedMapCanvas.zoomOut()
         }
-        embeddedMapRecenterBtn = buildMapFloatingBtn("◎ Fokus Mobil") {
+        val recenterPair = buildMapFloatingIconBtn(VectorIconView.IconType.RECENTER_DOT) {
             embeddedMapCanvas.recenterOnCar()
         }
-        mapControlsCol.addView(embeddedMapZoomInBtn, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+        embeddedMapZoomInBtn = zoomInPair.first; embeddedMapZoomInIcon = zoomInPair.second
+        embeddedMapZoomOutBtn = zoomOutPair.first; embeddedMapZoomOutIcon = zoomOutPair.second
+        embeddedMapRecenterBtn = recenterPair.first; embeddedMapRecenterIcon = recenterPair.second
+
+        mapControlsCol.addView(embeddedMapZoomInBtn, LayoutParams(dp(38f), dp(38f)).apply {
             bottomMargin = dp(6f)
         })
-        mapControlsCol.addView(embeddedMapZoomOutBtn, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+        mapControlsCol.addView(embeddedMapZoomOutBtn, LayoutParams(dp(38f), dp(38f)).apply {
             bottomMargin = dp(6f)
         })
-        mapControlsCol.addView(embeddedMapRecenterBtn, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        mapControlsCol.addView(embeddedMapRecenterBtn, LayoutParams(dp(38f), dp(38f)))
 
         embeddedMapFrame.addView(
             mapControlsCol,
@@ -1014,7 +1045,7 @@ class CarCockpitView(
         })
 
         // ==========================================
-        // 3. BOTTOM NAVIGATION DOCK BAR
+        // 3. BOTTOM NAVIGATION DOCK BAR (Settings Tab Removed!)
         // ==========================================
         bottomDockCard = GlassCardView(context)
         bottomDockCard.setPadding(dp(10f), dp(4f), dp(10f), dp(4f))
@@ -1024,13 +1055,12 @@ class CarCockpitView(
         }
 
         val dockSpecs = listOf(
-            Triple(VectorIconView.IconType.HOME, "BERANDA") { onSelectHomeStage() },
-            Triple(VectorIconView.IconType.MAPS, "PETA") { onSelectMapStage() },
+            Triple(VectorIconView.IconType.HOME, "HOME") { onSelectHomeStage() },
+            Triple(VectorIconView.IconType.MAPS, "MAP") { onSelectMapStage() },
             Triple(VectorIconView.IconType.MUSIC, "MEDIA") { onOpenMusic() },
-            Triple(VectorIconView.IconType.PHONE, "TELEPON") { onOpenPhone() },
-            Triple(VectorIconView.IconType.GAUGE, "OBD & MESIN") { onOpenObdScreen() },
-            Triple(VectorIconView.IconType.GEAR_COG, "SETELAN") { onOpenSettingsDialog() },
-            Triple(VectorIconView.IconType.APPS_GRID, "APLIKASI") { onOpenAppsScreen() }
+            Triple(VectorIconView.IconType.PHONE, "PHONE") { onOpenPhone() },
+            Triple(VectorIconView.IconType.GAUGE, "OBD & ENGINE") { onOpenObdScreen() },
+            Triple(VectorIconView.IconType.APPS_GRID, "APPS") { onOpenAppsScreen() }
         )
 
         for (i in dockSpecs.indices) {
@@ -1064,17 +1094,6 @@ class CarCockpitView(
         addView(bottomDockCard, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
     }
 
-    private fun buildModePill(label: String, onClick: () -> Unit): TextView {
-        return TextView(context).apply {
-            text = label
-            textSize = 10f
-            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-            includeFontPadding = false
-            setPadding(dp(9f), dp(4f), dp(9f), dp(4f))
-            setOnClickListener { onClick() }
-        }
-    }
-
     private fun sendMediaButton(keyCode: Int) {
         val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         val now = SystemClock.uptimeMillis()
@@ -1091,6 +1110,15 @@ class CarCockpitView(
         speedArcView.setSpeed(kmh)
     }
 
+    fun updateObdTelemetry(telemetry: ObdConnectionManager.ObdTelemetry) {
+        speedArcView.setObdTelemetry(
+            speed = telemetry.speedKmh,
+            rpm = telemetry.rpm,
+            gear = telemetry.gearLabel,
+            src = telemetry.sourceLabel
+        )
+    }
+
     fun updateGpsStatus(enabled: Boolean) {
         isGpsActive = enabled
         styleGpsPill()
@@ -1098,11 +1126,11 @@ class CarCockpitView(
 
     private fun styleGpsPill() {
         if (isGpsActive) {
-            gpsPillTv.text = "● GPS Aktif"
+            gpsPillTv.text = "● GPS Active"
             gpsPillTv.background = GlassTheme.innerDrawable(context, palette, 8f)
             gpsPillTv.setTextColor(if (palette.isDark) 0xFF34D399.toInt() else 0xFF059669.toInt())
         } else {
-            gpsPillTv.text = "○ GPS Nonaktif"
+            gpsPillTv.text = "○ GPS Off"
             val offBg = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = dp(8f).toFloat()
@@ -1117,13 +1145,19 @@ class CarCockpitView(
     fun updateClockAndPrayer(clockStr: String, prayers: PrayerCalc.PrayerTimes) {
         speedArcView.setClockText(clockStr)
 
-        val hrs = prayers.nextPrayerRemainingMinutes / 60
-        val mins = prayers.nextPrayerRemainingMinutes % 60
-        val remStr = if (hrs > 0) "${hrs}j ${mins}m" else "${mins}m"
-        prayerNextTv.text = "${prayers.nextPrayerName} ${prayers.nextPrayerTime} (-$remStr)"
+        if (adhanPlayerManager.isPlayingAdhan) {
+            prayerNextTv.text = "🔊 Stop Adhan"
+            prayerNextTv.setTextColor(0xFFEF4444.toInt())
+        } else {
+            val hrs = prayers.nextPrayerRemainingMinutes / 60
+            val mins = prayers.nextPrayerRemainingMinutes % 60
+            val remStr = if (hrs > 0) "${hrs}h ${mins}m" else "${mins}m"
+            prayerNextTv.text = "${prayers.nextPrayerName} ${prayers.nextPrayerTime} (-$remStr)"
+            prayerNextTv.setTextColor(palette.accent)
+        }
 
         val times = listOf(prayers.subuh, prayers.dzuhur, prayers.ashar, prayers.maghrib, prayers.isya)
-        val names = listOf("Subuh", "Dzuhur", "Ashar", "Maghrib", "Isya")
+        val names = listOf("Fajr", "Dhuhr", "Asr", "Maghrib", "Isha")
         for (i in 0 until 5) {
             prayerSlotTimes[i].text = times[i]
             val isNext = names[i] == prayers.nextPrayerName
@@ -1146,7 +1180,6 @@ class CarCockpitView(
         embeddedObdView = obdView
         embeddedAppsView = appsView
 
-        // Pastikan obdView & appsView terpasang di dalam stageHostFrame ketika mode CarCockpit aktif
         if (obdView.parent !== stageHostFrame) {
             (obdView.parent as? ViewGroup)?.removeView(obdView)
             stageHostFrame.addView(
@@ -1176,7 +1209,7 @@ class CarCockpitView(
                 0 -> activeStage == CockpitStage.HOME
                 1 -> activeStage == CockpitStage.MAP
                 4 -> activeStage == CockpitStage.OBD
-                6 -> activeStage == CockpitStage.APPS
+                5 -> activeStage == CockpitStage.APPS
                 else -> false
             }
             if (active) {
@@ -1195,7 +1228,7 @@ class CarCockpitView(
     fun updateLocationInfo(lat: Double, lon: Double, placeTitle: String, streetDetail: String, coordSub: String) {
         mapHeaderTv.text = placeTitle.uppercase(Locale.getDefault())
         val cleanStreet = streetDetail.trim()
-        val combinedFooter = if (cleanStreet.isNotEmpty() && !cleanStreet.equals("Mencari Jalan...", ignoreCase = true)) {
+        val combinedFooter = if (cleanStreet.isNotEmpty() && !cleanStreet.equals("Locating Street...", ignoreCase = true)) {
             "$cleanStreet • $coordSub"
         } else {
             coordSub
@@ -1217,33 +1250,39 @@ class CarCockpitView(
     fun refreshVehicleIdentity() {
         carNameTv.text = tripServiceManager.getVehicleName()
         carSubTv.text = tripServiceManager.getVehicleSubtitle()
+        val customBmp = tripServiceManager.getCustomCarBitmap()
+        if (customBmp != null) {
+            carImageView.setImageBitmap(customBmp)
+        } else {
+            carImageView.setImageResource(R.drawable.car_baleno)
+        }
     }
 
     fun refreshTripAndServices() {
         val cur = tripServiceManager.getCurrentTripState()
         val history = tripServiceManager.getTripHistory()
-        tripHistoryBadgeTv.text = "${history.size}/5 • Detail"
+        tripHistoryBadgeTv.text = "${history.size}/5 • Details"
 
         if (cur.hasStarted) {
-            tripDistValTv.text = String.format(Locale("id", "ID"), "%.1f", cur.distanceKm)
+            tripDistValTv.text = String.format(Locale.US, "%.1f", cur.distanceKm)
             val h = cur.durationMinutes / 60
             val m = cur.durationMinutes % 60
             tripDurValTv.text = String.format(Locale.US, "%02d:%02d", h, m)
             tripAvgValTv.text = cur.avgSpeedKmh.toString()
-            tripFootnoteTv.text = "Perjalanan aktif • Ketuk kartu untuk Riwayat"
+            tripFootnoteTv.text = "Active trip • Tap card for Trip History"
         } else if (history.isNotEmpty()) {
             val latest = history.first()
-            tripDistValTv.text = String.format(Locale("id", "ID"), "%.1f", latest.distanceKm)
+            tripDistValTv.text = String.format(Locale.US, "%.1f", latest.distanceKm)
             val h = latest.durationMinutes / 60
             val m = latest.durationMinutes % 60
             tripDurValTv.text = String.format(Locale.US, "%02d:%02d", h, m)
             tripAvgValTv.text = latest.avgSpeedKmh.toString()
-            tripFootnoteTv.text = "Terakhir (${latest.dateLabel}) • Ketuk untuk semua riwayat"
+            tripFootnoteTv.text = "Last (${latest.dateLabel}) • Tap for all trips"
         } else {
-            tripDistValTv.text = "0,0"
+            tripDistValTv.text = "0.0"
             tripDurValTv.text = "00:00"
             tripAvgValTv.text = "0"
-            tripFootnoteTv.text = "Dimulai saat GPS gerak • Ketuk untuk lihat riwayat"
+            tripFootnoteTv.text = "Starts on GPS movement • Tap for history"
         }
 
         val services = tripServiceManager.getServiceItems()
@@ -1277,8 +1316,8 @@ class CarCockpitView(
         val dueService = tripServiceManager.getServiceItems().firstOrNull { it.isDue }
         if (dueService != null) {
             alertBannerBox.visibility = View.VISIBLE
-            alertBannerTitleTv.text = "Jadwal Servis Jatuh Tempo!"
-            alertBannerSubTv.text = "${dueService.title} (${dueService.statusText}) • Ketuk kartu servis untuk reset"
+            alertBannerTitleTv.text = "Service Maintenance Due!"
+            alertBannerSubTv.text = "${dueService.title} (${dueService.statusText}) • Tap service card to reset"
             val bannerBg = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = dp(10f).toFloat()
@@ -1291,8 +1330,8 @@ class CarCockpitView(
             alertBannerCloseTv.visibility = View.GONE
         } else if (!seatbeltBannerDismissed) {
             alertBannerBox.visibility = View.VISIBLE
-            alertBannerTitleTv.text = "Kenakan Sabuk Pengaman"
-            alertBannerSubTv.text = "Jangan lupa pasang seatbelt demi keselamatan perjalanan Anda"
+            alertBannerTitleTv.text = "Fasten Your Seatbelt"
+            alertBannerSubTv.text = "Please fasten your seatbelt for a safe journey"
             val bannerBg = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = dp(10f).toFloat()
@@ -1311,7 +1350,7 @@ class CarCockpitView(
 
     private fun refreshQuoteText() {
         val q = QuoteRepository.getQuote(quoteIdx)
-        quoteCountTv.text = "${quoteIdx + 1}/${QuoteRepository.count()} • Ketuk"
+        quoteCountTv.text = "${quoteIdx + 1}/${QuoteRepository.count()} • Tap"
         quoteBodyTv.text = "\"${q.translation}\""
         quoteRefTv.text = q.reference
         quoteCountTv.setTextColor(palette.textMuted)
@@ -1332,41 +1371,97 @@ class CarCockpitView(
         if (!title.isNullOrBlank()) {
             mediaTitleTv.text = title
             val statePrefix = if (playing) "▶ " else "⏸ "
-            mediaSubTv.text = statePrefix + (artist ?: "Media Aktif")
+            mediaSubTv.text = statePrefix + (artist ?: "Active Audio")
         } else if (!hasAccess) {
-            mediaTitleTv.text = if (playing) "Musik Sedang Berputar" else "Kontrol Media"
-            mediaSubTv.text = "Ketuk di sini untuk izinkan akses info judul lagu"
+            mediaTitleTv.text = if (playing) "Audio Playing" else "Media Control"
+            mediaSubTv.text = "Tap here to grant song title access"
         } else {
-            mediaTitleTv.text = if (playing) "Musik Sedang Berputar" else "Kontrol Media"
-            mediaSubTv.text = "Ketuk untuk membuka YouTube Music"
+            mediaTitleTv.text = if (playing) "Audio Playing" else "Media Control"
+            mediaSubTv.text = "Tap to open YouTube Music"
         }
     }
 
     // ========================================================
-    // CUSTOM THEMED POPUPS (Menggantikan AlertDialog Bawaan)
+    // CUSTOM THEMED POPUPS (English UI)
     // ========================================================
+
+    private fun showAdhanPreviewDialog() {
+        HarayaDialog.showCustomModal(
+            context = context,
+            palette = palette,
+            title = "Prayer Schedule & Adhan Audio",
+            subtitle = "Auto-updates every minute & whenever GPS moves across locations",
+            contentBuilder = { container, dlg ->
+                val enabled = adhanPlayerManager.isAdhanAlertEnabled()
+                val toggleRow = HarayaDialog.buildOptionRow(
+                    context = context,
+                    palette = palette,
+                    title = "Automatic Adhan Alert at Prayer Time",
+                    subtitle = "Rotates tracks from Download/hisab (Fajr tracks exclusively for Fajr)",
+                    badgeText = if (enabled) "Enabled ✓" else "Muted",
+                    badgePositive = enabled
+                ) {
+                    adhanPlayerManager.setAdhanAlertEnabled(!enabled)
+                    dlg.dismiss()
+                    showAdhanPreviewDialog()
+                }
+                val testRegRow = HarayaDialog.buildOptionRow(
+                    context = context,
+                    palette = palette,
+                    title = "Test Regular Adhan Popup & Audio",
+                    subtitle = "Rotates randomly through non-Fajr Adhan recordings",
+                    badgeText = "Play Adhan",
+                    badgePositive = false
+                ) {
+                    dlg.dismiss()
+                    adhanPlayerManager.triggerAdhanWithPopup(context, palette, "Dhuhr", "12:00", isFajr = false)
+                }
+                val testFajrRow = HarayaDialog.buildOptionRow(
+                    context = context,
+                    palette = palette,
+                    title = "Test Fajr Adhan Popup & Audio",
+                    subtitle = "Rotates randomly through Fajr Adhan recordings",
+                    badgeText = "Play Fajr",
+                    badgePositive = false
+                ) {
+                    dlg.dismiss()
+                    adhanPlayerManager.triggerAdhanWithPopup(context, palette, "Fajr", "04:30", isFajr = true)
+                }
+                container.addView(toggleRow, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                    bottomMargin = dp(6f)
+                })
+                container.addView(testRegRow, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                    bottomMargin = dp(6f)
+                })
+                container.addView(testFajrRow, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            },
+            actions = listOf(
+                HarayaDialog.ActionButton("Close", isPrimary = true) { it.dismiss() }
+            )
+        )
+    }
 
     private fun promptNotificationListenerAccess() {
         HarayaDialog.showCustomModal(
             context = context,
             palette = palette,
-            title = "Aktifkan Info Judul Lagu",
-            subtitle = "Sinkronisasi judul & artis secara real-time dari YouTube Music / Spotify",
+            title = "Enable Song Title Info",
+            subtitle = "Real-time track & artist sync from YouTube Music / Spotify",
             contentBuilder = { container, _ ->
                 val infoTv = TextView(context).apply {
-                    text = "Agar Haraya Dock dapat menampilkan judul lagu dan penyanyi yang sedang diputar di kartu Kontrol Media, berikan izin Akses Notifikasi pada pengaturan sistem Android."
+                    text = "To display the currently playing song title and artist on the Media Control card, please grant Notification Access in Android Settings."
                     textSize = 11.5f
                     setTextColor(palette.textPrimary)
                 }
                 container.addView(infoTv)
             },
             actions = listOf(
-                HarayaDialog.ActionButton("Batal") { it.dismiss() },
-                HarayaDialog.ActionButton("Tetap Buka Musik") {
+                HarayaDialog.ActionButton("Cancel") { it.dismiss() },
+                HarayaDialog.ActionButton("Open Music Anyway") {
                     it.dismiss()
                     onOpenMusic()
                 },
-                HarayaDialog.ActionButton("Buka Pengaturan Izin", isPrimary = true) {
+                HarayaDialog.ActionButton("Grant Permission", isPrimary = true) {
                     it.dismiss()
                     runCatching {
                         context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).apply {
@@ -1385,13 +1480,13 @@ class CarCockpitView(
         HarayaDialog.showCustomModal(
             context = context,
             palette = palette,
-            title = "Verifikasi PIN Servis • ${item.title}",
-            subtitle = "Masukkan PIN keamanan untuk mengatur atau mereset jadwal servis",
+            title = "Verify Service PIN • ${item.title}",
+            subtitle = "Enter your security PIN to edit or reset this maintenance schedule",
             contentBuilder = { container, _ ->
                 val input = HarayaDialog.buildStyledInput(
                     context = context,
                     palette = palette,
-                    hintText = "Masukkan PIN (Default: 0000)",
+                    hintText = "Enter Security PIN",
                     inputTypeFlags = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD,
                     maxLength = 8,
                     centerText = true
@@ -1400,14 +1495,14 @@ class CarCockpitView(
                 container.addView(input, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             },
             actions = listOf(
-                HarayaDialog.ActionButton("Batal") { it.dismiss() },
-                HarayaDialog.ActionButton("Verifikasi & Lanjut", isPrimary = true) { dlg ->
+                HarayaDialog.ActionButton("Cancel") { it.dismiss() },
+                HarayaDialog.ActionButton("Verify & Continue", isPrimary = true) { dlg ->
                     val entered = pinInputRef?.text?.toString().orEmpty()
                     if (tripServiceManager.verifyServicePin(entered)) {
                         dlg.dismiss()
                         showEditServiceDialog(serviceIndex)
                     } else {
-                        Toast.makeText(context, "PIN tidak sesuai! PIN standar adalah 0000 (bisa diubah di menu Setelan).", Toast.LENGTH_LONG).show()
+                        Toast.makeText(context, "Incorrect PIN! You can manage your PIN in Settings.", Toast.LENGTH_LONG).show()
                     }
                 }
             )
@@ -1421,13 +1516,13 @@ class CarCockpitView(
         HarayaDialog.showCustomModal(
             context = context,
             palette = palette,
-            title = "Atur Jadwal Servis • ${item.title}",
-            subtitle = "Target standar: ${item.defaultTarget} ${item.unitType} (isi 0 untuk simulasi Jatuh Tempo)",
+            title = "Edit Service Schedule • ${item.title}",
+            subtitle = "Standard interval: ${item.defaultTarget} ${item.unitType} (enter 0 to simulate Due Now)",
             contentBuilder = { container, _ ->
                 val input = HarayaDialog.buildStyledInput(
                     context = context,
                     palette = palette,
-                    hintText = "Sisa ${item.unitType} (mis. ${item.defaultTarget})",
+                    hintText = "Remaining ${item.unitType} (e.g. ${item.defaultTarget})",
                     initialText = item.remainingValue.toString(),
                     inputTypeFlags = InputType.TYPE_CLASS_NUMBER,
                     maxLength = 7,
@@ -1437,13 +1532,13 @@ class CarCockpitView(
                 container.addView(input, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             },
             actions = listOf(
-                HarayaDialog.ActionButton("Batal") { it.dismiss() },
+                HarayaDialog.ActionButton("Cancel") { it.dismiss() },
                 HarayaDialog.ActionButton("Reset (${item.defaultTarget} ${item.unitType})") { dlg ->
                     tripServiceManager.updateServiceValue(item.id, item.defaultTarget)
                     refreshTripAndServices()
                     dlg.dismiss()
                 },
-                HarayaDialog.ActionButton("Simpan", isPrimary = true) { dlg ->
+                HarayaDialog.ActionButton("Save", isPrimary = true) { dlg ->
                     val v = valInputRef?.text?.toString()?.toIntOrNull() ?: item.defaultTarget
                     tripServiceManager.updateServiceValue(item.id, v)
                     refreshTripAndServices()
@@ -1460,40 +1555,40 @@ class CarCockpitView(
         val actionList = mutableListOf<HarayaDialog.ActionButton>()
         if (history.isNotEmpty()) {
             actionList.add(
-                HarayaDialog.ActionButton("Hapus Riwayat", isDestructive = true) { dlg ->
+                HarayaDialog.ActionButton("Clear History", isDestructive = true) { dlg ->
                     tripServiceManager.clearTripHistory()
                     refreshTripAndServices()
                     dlg.dismiss()
-                    Toast.makeText(context, "Riwayat perjalanan dibersihkan", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "Trip history cleared", Toast.LENGTH_SHORT).show()
                 }
             )
         }
         if (cur.hasStarted) {
             actionList.add(
-                HarayaDialog.ActionButton("Simpan Perjalanan Aktif") { dlg ->
+                HarayaDialog.ActionButton("Save Active Trip") { dlg ->
                     tripServiceManager.saveCurrentTripToHistory()
                     refreshTripAndServices()
                     dlg.dismiss()
-                    Toast.makeText(context, "Perjalanan disimpan ke Riwayat", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "Active trip saved to History", Toast.LENGTH_SHORT).show()
                 }
             )
         }
-        actionList.add(HarayaDialog.ActionButton("Tutup", isPrimary = true) { it.dismiss() })
+        actionList.add(HarayaDialog.ActionButton("Close", isPrimary = true) { it.dismiss() })
 
         HarayaDialog.showCustomModal(
             context = context,
             palette = palette,
-            title = "Ringkasan & Riwayat Perjalanan",
-            subtitle = "Otomatis menyimpan perjalanan setelah mobil parkir 15 menit",
+            title = "Trip Summary & History",
+            subtitle = "Automatically saves trips after the vehicle is parked for 15 minutes",
             contentBuilder = { container, _ ->
-                // 1. Kartu Perjalanan Saat Ini
+                // 1. Current Trip Card
                 val activeCard = LinearLayout(context).apply {
                     orientation = VERTICAL
                     background = GlassTheme.innerDrawable(context, palette, 10f)
                     setPadding(dp(12f), dp(9f), dp(12f), dp(9f))
                 }
                 val activeHead = TextView(context).apply {
-                    text = if (cur.hasStarted) "● PERJALANAN SAAT INI (AKTIF)" else "PERJALANAN SAAT INI"
+                    text = if (cur.hasStarted) "● CURRENT TRIP (ACTIVE)" else "CURRENT TRIP"
                     textSize = 9.5f
                     typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
                     setTextColor(palette.accent)
@@ -1504,12 +1599,12 @@ class CarCockpitView(
                     val m = cur.durationMinutes % 60
                     text = if (cur.hasStarted) {
                         String.format(
-                            Locale("id", "ID"),
-                            "Jarak Tempuh: %.1f km   •   Durasi: %02d:%02d   •   Rata-rata: %d km/jam",
+                            Locale.US,
+                            "Distance: %.1f km   •   Duration: %02d:%02d   •   Avg Speed: %d km/h",
                             cur.distanceKm, h, m, cur.avgSpeedKmh
                         )
                     } else {
-                        "Belum ada pergerakan aktif (otomatis menghitung saat GPS mendeteksi kendaraan berjalan)."
+                        "No active movement yet (automatically starts recording when GPS detects vehicle motion)."
                     }
                     textSize = 11f
                     setTextColor(palette.textPrimary)
@@ -1523,9 +1618,9 @@ class CarCockpitView(
                     bottomMargin = dp(10f)
                 })
 
-                // 2. Daftar 5 Riwayat Tersimpan
+                // 2. Saved Trips List (up to 5)
                 val histTitle = TextView(context).apply {
-                    text = "DAFTAR RIWAYAT TERSIMPAN (${history.size}/5)"
+                    text = "SAVED TRIP HISTORY (${history.size}/5)"
                     textSize = 9.5f
                     typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
                     setTextColor(palette.textSecondary)
@@ -1537,7 +1632,7 @@ class CarCockpitView(
 
                 if (history.isEmpty()) {
                     val emptyBox = TextView(context).apply {
-                        text = "Belum ada riwayat perjalanan tersimpan."
+                        text = "No saved trips yet."
                         textSize = 11f
                         setTextColor(palette.textMuted)
                         background = GlassTheme.innerDrawable(context, palette, 10f)
@@ -1561,8 +1656,8 @@ class CarCockpitView(
                         }
                         val statsTv = TextView(context).apply {
                             text = String.format(
-                                Locale("id", "ID"),
-                                "%.1f km  •  %d mnt  •  %d km/jam",
+                                Locale.US,
+                                "%.1f km  •  %d min  •  %d km/h",
                                 item.distanceKm, item.durationMinutes, item.avgSpeedKmh
                             )
                             textSize = 10.5f
@@ -1585,20 +1680,19 @@ class CarCockpitView(
 
     fun applyTheme(newPalette: GlassPalette, currentMode: ThemeMode, gpsEnabled: Boolean) {
         palette = newPalette
+        currentThemeMode = currentMode
         isGpsActive = gpsEnabled
 
-        fun styleModeBtn(btn: TextView, active: Boolean) {
-            if (active) {
-                btn.background = GlassTheme.selectDrawable(context, palette, 8f)
-                btn.setTextColor(palette.selectFg)
-            } else {
-                btn.background = GlassTheme.innerDrawable(context, palette, 8f)
-                btn.setTextColor(palette.textSecondary)
-            }
+        // 1-Button Theme Mode Cycler (Sun -> Moon -> A)
+        val modeIconType = when (currentMode) {
+            ThemeMode.LIGHT -> VectorIconView.IconType.SUN
+            ThemeMode.DARK -> VectorIconView.IconType.MOON
+            ThemeMode.AUTO -> VectorIconView.IconType.AUTO_A
         }
-        styleModeBtn(modeTerangBtn, currentMode == ThemeMode.LIGHT)
-        styleModeBtn(modeGelapBtn, currentMode == ThemeMode.DARK)
-        styleModeBtn(modeAutoBtn, currentMode == ThemeMode.AUTO)
+        themeCycleIcon.setIcon(modeIconType)
+        themeCycleIcon.setTint(palette.selectFg)
+        themeCycleBtn.background = GlassTheme.selectDrawable(context, palette, 8f)
+        GlassTheme.makePressable(context, themeCycleBtn, palette, 8f)
 
         layoutSwitchBtn.background = GlassTheme.innerDrawable(context, palette, 8f)
         layoutSwitchBtn.setTextColor(palette.textPrimary)
@@ -1610,7 +1704,7 @@ class CarCockpitView(
         styleGpsPill()
 
         settingsTopBtn.background = GlassTheme.innerDrawable(context, palette, 8f)
-        settingsTopBtn.setTextColor(palette.textPrimary)
+        settingsTopIcon.setTint(palette.textPrimary)
         GlassTheme.makePressable(context, settingsTopBtn, palette, 8f)
 
         // Left Column
@@ -1623,7 +1717,7 @@ class CarCockpitView(
 
         prayerCard.applyTheme(palette)
         prayerHeaderTitleTv.setTextColor(palette.textSecondary)
-        prayerNextTv.setTextColor(palette.accent)
+        prayerNextTv.setTextColor(if (adhanPlayerManager.isPlayingAdhan) 0xFFEF4444.toInt() else palette.accent)
 
         quoteCard.applyTheme(palette)
         quoteHeaderTitleTv.setTextColor(palette.textSecondary)
@@ -1663,6 +1757,7 @@ class CarCockpitView(
 
         serviceCard.applyTheme(palette)
         serviceHeaderTv.setTextColor(palette.textSecondary)
+        servicePinLockIcon.setTint(palette.textMuted)
         servicePinBadgeTv.setTextColor(palette.textMuted)
 
         weatherCard.applyTheme(palette)
@@ -1690,10 +1785,14 @@ class CarCockpitView(
         embeddedMapBackHomeBtn.setTextColor(palette.textSecondary)
         GlassTheme.makePressable(context, embeddedMapBackHomeBtn, palette, 8f)
 
-        for (btn in listOf(embeddedMapZoomInBtn, embeddedMapZoomOutBtn, embeddedMapRecenterBtn)) {
-            btn.background = GlassTheme.overDrawable(context, palette, 10f)
-            btn.setTextColor(palette.textPrimary)
-            GlassTheme.makePressable(context, btn, palette, 10f)
+        for (pair in listOf(
+            embeddedMapZoomInBtn to embeddedMapZoomInIcon,
+            embeddedMapZoomOutBtn to embeddedMapZoomOutIcon,
+            embeddedMapRecenterBtn to embeddedMapRecenterIcon
+        )) {
+            pair.first.background = GlassTheme.overDrawable(context, palette, 10f)
+            pair.second.setTint(palette.textPrimary)
+            GlassTheme.makePressable(context, pair.first, palette, 10f)
         }
 
         // Bottom Dock

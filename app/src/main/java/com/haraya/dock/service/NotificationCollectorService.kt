@@ -74,7 +74,7 @@ class NotificationCollectorService : NotificationListenerService() {
                     ?: meta.getString(MediaMetadata.METADATA_KEY_ALBUM)
                 if (!title.isNullOrBlank()) {
                     currentMediaTitle = title
-                    currentMediaArtist = artist?.takeIf { it.isNotBlank() } ?: "Memutar Musik"
+                    currentMediaArtist = artist?.takeIf { it.isNotBlank() } ?: "Playing Audio"
                 }
             }
             onMediaChangedCallback?.invoke()

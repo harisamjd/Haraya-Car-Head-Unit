@@ -81,14 +81,14 @@ object PrayerCalc {
         val currentMinutes = calendar.get(Calendar.HOUR_OF_DAY) * 60 + calendar.get(Calendar.MINUTE)
 
         val prayerSchedule = listOf(
-            Triple("Subuh", (subuhHour * 60).roundToInt(), subuhStr),
-            Triple("Dzuhur", (dzuhurHour * 60).roundToInt(), dzuhurStr),
-            Triple("Ashar", (asharHour * 60).roundToInt(), asharStr),
+            Triple("Fajr", (subuhHour * 60).roundToInt(), subuhStr),
+            Triple("Dhuhr", (dzuhurHour * 60).roundToInt(), dzuhurStr),
+            Triple("Asr", (asharHour * 60).roundToInt(), asharStr),
             Triple("Maghrib", (maghribHour * 60).roundToInt(), maghribStr),
-            Triple("Isya", (isyaHour * 60).roundToInt(), isyaStr)
+            Triple("Isha", (isyaHour * 60).roundToInt(), isyaStr)
         )
 
-        var nextName = "Subuh"
+        var nextName = "Fajr"
         var nextTime = subuhStr
         var remainingMin = 0
         for ((name, pMin, timeStr) in prayerSchedule) {
@@ -100,7 +100,7 @@ object PrayerCalc {
             }
         }
         if (remainingMin == 0) {
-            nextName = "Subuh"
+            nextName = "Fajr"
             nextTime = subuhStr
             remainingMin = (24 * 60 - currentMinutes) + (subuhHour * 60).roundToInt()
         }

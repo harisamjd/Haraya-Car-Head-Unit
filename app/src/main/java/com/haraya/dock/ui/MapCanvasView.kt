@@ -42,7 +42,7 @@ class MapCanvasView(
     private var palette: GlassPalette = GlassTheme.Dark
     private var currentLat: Double = -6.4931
     private var currentLon: Double = 106.8056
-    private var streetLabel: String = "Mencari Jalan..."
+    private var streetLabel: String = "Locating Street..."
 
     // Offset geser jari pada mode interaktif (dalam piksel tile)
     private var panOffsetPxX: Float = 0f
@@ -166,18 +166,59 @@ class MapCanvasView(
             cachedBitmap?.let { canvas.drawBitmap(it, 0f, 0f, null) }
         }
 
-        // Titik posisi kendaraan (ikut bergeser jika peta di-pan)
+        // Vehicle Car Location Marker (moves with pan offset)
         val carX = w * 0.50f + panOffsetPxX
         val carY = h * 0.50f + panOffsetPxY
+        drawCarLocationMarker(canvas, carX, carY)
+    }
+
+    private fun drawCarLocationMarker(canvas: Canvas, cx: Float, cy: Float) {
+        val scale = if (interactivePanZoom) 1.25f else 1.0f
+        val u = GlassTheme.dpf(context, 1f) * scale
+
+        canvas.save()
+        canvas.translate(cx, cy)
+        // Slight navigation angle (-15 deg) for natural road orientation
+        canvas.rotate(-15f)
+
+        // 1. Soft radar pulse halo
         overlayPaint.style = Paint.Style.FILL
+        overlayPaint.color = (palette.accent and 0x00FFFFFF) or 0x38000000
+        canvas.drawCircle(0f, 0f, 17f * u, overlayPaint)
+
+        // 2. Headlight beam cone ahead of car
+        val beamPath = Path().apply {
+            moveTo(-4.5f * u, -10f * u)
+            lineTo(-10f * u, -22f * u)
+            lineTo(10f * u, -22f * u)
+            lineTo(4.5f * u, -10f * u)
+            close()
+        }
         overlayPaint.color = (palette.accent and 0x00FFFFFF) or 0x44000000
-        canvas.drawCircle(carX, carY, GlassTheme.dp(context, 16f).toFloat(), overlayPaint)
+        canvas.drawPath(beamPath, overlayPaint)
 
+        // 3. Outer white chassis border + side mirrors
         overlayPaint.color = 0xFFFFFFFF.toInt()
-        canvas.drawCircle(carX, carY, GlassTheme.dp(context, 7f).toFloat(), overlayPaint)
+        canvas.drawRoundRect(RectF(-8.2f * u, -4.5f * u, 8.2f * u, -2.2f * u), 1.5f * u, 1.5f * u, overlayPaint)
+        canvas.drawRoundRect(RectF(-6.8f * u, -11.5f * u, 6.8f * u, 11.5f * u), 4.2f * u, 4.2f * u, overlayPaint)
 
+        // 4. Inner car body in theme accent color
         overlayPaint.color = palette.accent
-        canvas.drawCircle(carX, carY, GlassTheme.dp(context, 4.8f).toFloat(), overlayPaint)
+        canvas.drawRoundRect(RectF(-5.4f * u, -10.1f * u, 5.4f * u, 10.1f * u), 3.4f * u, 3.4f * u, overlayPaint)
+
+        // 5. Dark front windshield, roof, & rear window
+        val glassColor = if (palette.isDark) 0xFF0E1318.toInt() else 0xFF1E293B.toInt()
+        overlayPaint.color = glassColor
+        // Front windshield
+        canvas.drawRoundRect(RectF(-4.1f * u, -6.2f * u, 4.1f * u, -2.0f * u), 1.5f * u, 1.5f * u, overlayPaint)
+        // Rear window
+        canvas.drawRoundRect(RectF(-3.8f * u, 4.2f * u, 3.8f * u, 7.2f * u), 1.2f * u, 1.2f * u, overlayPaint)
+
+        // 6. Roof panel highlight
+        overlayPaint.color = 0xFFFFFFFF.toInt()
+        canvas.drawRoundRect(RectF(-3.6f * u, -1.2f * u, 3.6f * u, 3.5f * u), 1.2f * u, 1.2f * u, overlayPaint)
+
+        canvas.restore()
     }
 
     private fun drawLiveOsmTiles(canvas: Canvas, w: Float, h: Float): Boolean {
