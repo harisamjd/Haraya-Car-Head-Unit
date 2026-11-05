@@ -42,6 +42,7 @@ import com.haraya.dock.service.NotificationCollectorService
 import com.haraya.dock.theme.ThemeMode
 import com.haraya.dock.theme.ThemeResolver
 import com.haraya.dock.ui.CarCockpitView
+import com.haraya.dock.ui.HarayaDialog
 import com.haraya.dock.ui.MapCanvasView
 import com.haraya.dock.ui.RpmGaugeView
 import com.haraya.dock.ui.SpeedGaugeView
@@ -1689,148 +1690,212 @@ class MainActivity : Activity(), LocationListener {
     }
 
     private fun showCockpitSettingsDialog() {
-        val themeStyle = if (palette.isDark) {
-            android.R.style.Theme_DeviceDefault_Dialog_Alert
-        } else {
-            android.R.style.Theme_DeviceDefault_Light_Dialog_Alert
-        }
         val notifOk = NotificationCollectorService.isNotificationAccessGranted(this)
         val launcherOk = isDefaultLauncher()
         val gpsOk = isGpsProviderActive()
 
-        val items = arrayOf(
-            "1. Ubah PIN Jadwal Servis (Saat ini: •••• / Default 0000)",
-            "2. Ubah Identitas Mobil (${tripServiceManager.getVehicleName()} • ${tripServiceManager.getVehicleSubtitle()})",
-            "3. Akses Info Judul Lagu Media: ${if (notifOk) "Aktif ✓" else "Belum Aktif (Ketuk untuk Aktifkan)"}",
-            "4. Pengaturan Lokasi & GPS: ${if (gpsOk) "GPS Aktif ✓" else "GPS Nonaktif (Ketuk untuk Nyalakan)"}",
-            "5. Beranda / Launcher Default: ${if (launcherOk) "Sudah Aktif ✓" else "Setel sebagai Launcher Utama"}",
-            "6. Ganti Tata Letak ke Mode Sutra Klasik"
-        )
-
-        AlertDialog.Builder(this, themeStyle)
-            .setTitle("Pengaturan Haraya Dock")
-            .setItems(items) { _, which ->
-                when (which) {
-                    0 -> showChangePinDialog()
-                    1 -> showEditVehicleDialog()
-                    2 -> {
+        HarayaDialog.showCustomModal(
+            context = this,
+            palette = palette,
+            title = "Pengaturan Haraya Dock",
+            subtitle = "Konfigurasi keamanan servis, identitas kendaraan, & izin sistem",
+            contentBuilder = { container, dlg ->
+                val rows = listOf(
+                    HarayaDialog.buildOptionRow(
+                        context = this,
+                        palette = palette,
+                        title = "PIN Keamanan Jadwal Servis",
+                        subtitle = "PIN diperlukan saat mengubah atau mereset pengingat servis (Standar: 0000)",
+                        badgeText = "Ubah PIN",
+                        badgePositive = false
+                    ) {
+                        dlg.dismiss()
+                        showChangePinDialog()
+                    },
+                    HarayaDialog.buildOptionRow(
+                        context = this,
+                        palette = palette,
+                        title = "Identitas Kendaraan",
+                        subtitle = "${tripServiceManager.getVehicleName()} • ${tripServiceManager.getVehicleSubtitle()}",
+                        badgeText = "Edit Mobil",
+                        badgePositive = false
+                    ) {
+                        dlg.dismiss()
+                        showEditVehicleDialog()
+                    },
+                    HarayaDialog.buildOptionRow(
+                        context = this,
+                        palette = palette,
+                        title = "Akses Info Judul Lagu & Media",
+                        subtitle = if (notifOk) "Terhubung ke YouTube Music / Spotify" else "Izinkan akses agar judul lagu tampil otomatis",
+                        badgeText = if (notifOk) "Aktif ✓" else "Aktifkan",
+                        badgePositive = notifOk
+                    ) {
+                        dlg.dismiss()
                         runCatching {
                             startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).apply {
                                 flags = Intent.FLAG_ACTIVITY_NEW_TASK
                             })
                         }
-                    }
-                    3 -> {
+                    },
+                    HarayaDialog.buildOptionRow(
+                        context = this,
+                        palette = palette,
+                        title = "Layanan Lokasi & GPS",
+                        subtitle = if (gpsOk) "Sinyal lokasi aktif untuk Speedometer & Cuaca" else "Lokasi nonaktif • Ketuk untuk menyalakan GPS",
+                        badgeText = if (gpsOk) "GPS Aktif ✓" else "Nyalakan",
+                        badgePositive = gpsOk
+                    ) {
+                        dlg.dismiss()
                         runCatching {
                             startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS).apply {
                                 flags = Intent.FLAG_ACTIVITY_NEW_TASK
                             })
                         }
+                    },
+                    HarayaDialog.buildOptionRow(
+                        context = this,
+                        palette = palette,
+                        title = "Aplikasi Beranda Utama (Default Launcher)",
+                        subtitle = if (launcherOk) "Haraya Dock sudah menjadi beranda utama" else "Jadikan Haraya Dock sebagai launcher utama head unit",
+                        badgeText = if (launcherOk) "Aktif ✓" else "Setel Beranda",
+                        badgePositive = launcherOk
+                    ) {
+                        dlg.dismiss()
+                        requestSetDefaultLauncher()
+                    },
+                    HarayaDialog.buildOptionRow(
+                        context = this,
+                        palette = palette,
+                        title = "Tata Letak Tampilan Beranda",
+                        subtitle = "Beralih ke tampilan Mode Klasik dengan Sidebar Kiri",
+                        badgeText = "Mode Klasik",
+                        badgePositive = false
+                    ) {
+                        dlg.dismiss()
+                        setHomeStyle(HomeStyle.CLASSIC_SILK)
                     }
-                    4 -> requestSetDefaultLauncher()
-                    5 -> setHomeStyle(HomeStyle.CLASSIC_SILK)
+                )
+                for ((idx, r) in rows.withIndex()) {
+                    container.addView(r, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                        if (idx < rows.lastIndex) bottomMargin = dp(6f)
+                    })
                 }
-            }
-            .setNegativeButton("Tutup", null)
-            .show()
+            },
+            actions = listOf(
+                HarayaDialog.ActionButton("Tutup", isPrimary = true) { it.dismiss() }
+            )
+        )
     }
 
     private fun showChangePinDialog() {
-        val themeStyle = if (palette.isDark) {
-            android.R.style.Theme_DeviceDefault_Dialog_Alert
-        } else {
-            android.R.style.Theme_DeviceDefault_Light_Dialog_Alert
-        }
+        var oldPinRef: EditText? = null
+        var newPinRef: EditText? = null
 
-        val col = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            val p = dp(20f)
-            setPadding(p, dp(10f), p, 0)
-        }
-        val oldPinEt = EditText(this).apply {
-            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
-            hint = "Masukkan PIN Lama (Default: 0000)"
-            filters = arrayOf(InputFilter.LengthFilter(8))
-        }
-        val newPinEt = EditText(this).apply {
-            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
-            hint = "Masukkan PIN Baru (4-8 angka)"
-            filters = arrayOf(InputFilter.LengthFilter(8))
-        }
-        col.addView(oldPinEt)
-        col.addView(newPinEt, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-            topMargin = dp(8f)
-        })
-
-        AlertDialog.Builder(this, themeStyle)
-            .setTitle("Ubah PIN Jadwal Servis")
-            .setMessage("PIN digunakan saat mengatur atau mereset pengingat servis kendaraan:")
-            .setView(col)
-            .setPositiveButton("Simpan PIN") { _, _ ->
-                val oldPin = oldPinEt.text?.toString().orEmpty()
-                val newPin = newPinEt.text?.toString().orEmpty().trim()
-                if (!tripServiceManager.verifyServicePin(oldPin)) {
-                    Toast.makeText(this, "PIN Lama tidak sesuai!", Toast.LENGTH_LONG).show()
-                } else if (newPin.length < 4) {
-                    Toast.makeText(this, "PIN Baru minimal terdiri dari 4 angka!", Toast.LENGTH_LONG).show()
-                } else {
-                    tripServiceManager.setServicePin(newPin)
-                    Toast.makeText(this, "PIN Jadwal Servis berhasil diperbarui", Toast.LENGTH_SHORT).show()
+        HarayaDialog.showCustomModal(
+            context = this,
+            palette = palette,
+            title = "Ubah PIN Jadwal Servis",
+            subtitle = "PIN melindungi jadwal servis agar tidak ter-reset secara tidak sengaja",
+            contentBuilder = { container, _ ->
+                val oldEt = HarayaDialog.buildStyledInput(
+                    context = this,
+                    palette = palette,
+                    hintText = "PIN Lama (Standar: 0000)",
+                    inputTypeFlags = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD,
+                    maxLength = 8,
+                    centerText = true
+                )
+                val newEt = HarayaDialog.buildStyledInput(
+                    context = this,
+                    palette = palette,
+                    hintText = "PIN Baru (4 - 8 angka)",
+                    inputTypeFlags = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD,
+                    maxLength = 8,
+                    centerText = true
+                )
+                oldPinRef = oldEt
+                newPinRef = newEt
+                container.addView(oldEt, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+                container.addView(newEt, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                    topMargin = dp(8f)
+                })
+            },
+            actions = listOf(
+                HarayaDialog.ActionButton("Batal") { it.dismiss() },
+                HarayaDialog.ActionButton("Reset ke 0000") { dlg ->
+                    val oldPin = oldPinRef?.text?.toString().orEmpty()
+                    if (tripServiceManager.verifyServicePin(oldPin)) {
+                        tripServiceManager.setServicePin("0000")
+                        dlg.dismiss()
+                        Toast.makeText(this, "PIN dikembalikan ke 0000", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(this, "Masukkan PIN lama yang benar untuk mereset!", Toast.LENGTH_LONG).show()
+                    }
+                },
+                HarayaDialog.ActionButton("Simpan PIN", isPrimary = true) { dlg ->
+                    val oldPin = oldPinRef?.text?.toString().orEmpty()
+                    val newPin = newPinRef?.text?.toString().orEmpty().trim()
+                    if (!tripServiceManager.verifyServicePin(oldPin)) {
+                        Toast.makeText(this, "PIN Lama tidak sesuai!", Toast.LENGTH_LONG).show()
+                    } else if (newPin.length < 4) {
+                        Toast.makeText(this, "PIN Baru minimal terdiri dari 4 angka!", Toast.LENGTH_LONG).show()
+                    } else {
+                        tripServiceManager.setServicePin(newPin)
+                        dlg.dismiss()
+                        Toast.makeText(this, "PIN Jadwal Servis berhasil diperbarui", Toast.LENGTH_SHORT).show()
+                    }
                 }
-            }
-            .setNeutralButton("Reset ke 0000") { _, _ ->
-                val oldPin = oldPinEt.text?.toString().orEmpty()
-                if (tripServiceManager.verifyServicePin(oldPin)) {
-                    tripServiceManager.setServicePin("0000")
-                    Toast.makeText(this, "PIN dikembalikan ke 0000", Toast.LENGTH_SHORT).show()
-                } else {
-                    Toast.makeText(this, "Masukkan PIN lama yang benar untuk mereset!", Toast.LENGTH_LONG).show()
-                }
-            }
-            .setNegativeButton("Batal", null)
-            .show()
+            )
+        )
     }
 
     private fun showEditVehicleDialog() {
-        val themeStyle = if (palette.isDark) {
-            android.R.style.Theme_DeviceDefault_Dialog_Alert
-        } else {
-            android.R.style.Theme_DeviceDefault_Light_Dialog_Alert
-        }
+        var nameRef: EditText? = null
+        var subRef: EditText? = null
 
-        val col = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            val p = dp(20f)
-            setPadding(p, dp(10f), p, 0)
-        }
-        val nameEt = EditText(this).apply {
-            setText(tripServiceManager.getVehicleName())
-            hint = "Nama Mobil (mis. Suzuki Baleno)"
-            setSingleLine(true)
-        }
-        val subEt = EditText(this).apply {
-            setText(tripServiceManager.getVehicleSubtitle())
-            hint = "Tipe & Plat (mis. Hatchback • B 1353 EYX)"
-            setSingleLine(true)
-        }
-        col.addView(nameEt)
-        col.addView(subEt, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-            topMargin = dp(8f)
-        })
-
-        AlertDialog.Builder(this, themeStyle)
-            .setTitle("Identitas Kendaraan")
-            .setView(col)
-            .setPositiveButton("Simpan") { _, _ ->
-                tripServiceManager.setVehicleIdentity(
-                    nameEt.text?.toString().orEmpty(),
-                    subEt.text?.toString().orEmpty()
+        HarayaDialog.showCustomModal(
+            context = this,
+            palette = palette,
+            title = "Identitas Kendaraan",
+            subtitle = "Ditampilkan di bawah ilustrasi mobil pada layar utama",
+            contentBuilder = { container, _ ->
+                val nameEt = HarayaDialog.buildStyledInput(
+                    context = this,
+                    palette = palette,
+                    hintText = "Nama Mobil (mis. Suzuki Baleno)",
+                    initialText = tripServiceManager.getVehicleName(),
+                    inputTypeFlags = InputType.TYPE_CLASS_TEXT,
+                    maxLength = 40
                 )
-                carCockpitView.refreshVehicleIdentity()
-                Toast.makeText(this, "Identitas kendaraan diperbarui", Toast.LENGTH_SHORT).show()
-            }
-            .setNegativeButton("Batal", null)
-            .show()
+                val subEt = HarayaDialog.buildStyledInput(
+                    context = this,
+                    palette = palette,
+                    hintText = "Tipe & Plat (mis. Hatchback • B 1353 EYX)",
+                    initialText = tripServiceManager.getVehicleSubtitle(),
+                    inputTypeFlags = InputType.TYPE_CLASS_TEXT,
+                    maxLength = 50
+                )
+                nameRef = nameEt
+                subRef = subEt
+                container.addView(nameEt, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+                container.addView(subEt, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                    topMargin = dp(8f)
+                })
+            },
+            actions = listOf(
+                HarayaDialog.ActionButton("Batal") { it.dismiss() },
+                HarayaDialog.ActionButton("Simpan", isPrimary = true) { dlg ->
+                    tripServiceManager.setVehicleIdentity(
+                        nameRef?.text?.toString().orEmpty(),
+                        subRef?.text?.toString().orEmpty()
+                    )
+                    carCockpitView.refreshVehicleIdentity()
+                    dlg.dismiss()
+                    Toast.makeText(this, "Identitas kendaraan diperbarui", Toast.LENGTH_SHORT).show()
+                }
+            )
+        )
     }
 
     private fun requestLocationPermissionIfNeeded() {

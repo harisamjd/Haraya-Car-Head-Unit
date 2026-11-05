@@ -10,7 +10,7 @@ import kotlin.math.roundToInt
 /**
  * Latar belakang kanvas sutra berlapis (Cubic Bézier folds), dirender sekali ke Bitmap
  * saat ukuran layar atau tema berubah sehingga 0% pemakaian CPU saat diam.
- * Terinspirasi dari arsitektur GoldenDash (MIT License).
+ * Menggunakan palet Carbon Slate & Warm Amber (tanpa warna ungu AI).
  */
 class SilkBackgroundView(context: Context) : View(context) {
 
@@ -61,24 +61,24 @@ class SilkBackgroundView(context: Context) : View(context) {
             val p = Paint(Paint.ANTI_ALIAS_FLAG or Paint.DITHER_FLAG)
             val baseColors = if (dark) {
                 intArrayOf(
-                    0xFF1D1D31.toInt(),
-                    0xFF121220.toInt(),
-                    0xFF24243D.toInt(),
-                    0xFF181A2E.toInt()
+                    0xFF0E1216.toInt(),
+                    0xFF0A0D10.toInt(),
+                    0xFF141A20.toInt(),
+                    0xFF0C1014.toInt()
                 )
             } else {
                 intArrayOf(
-                    0xFFF2E9DC.toInt(),
-                    0xFFDCC7AC.toInt(),
-                    0xFFEFE4D5.toInt(),
-                    0xFFD6BE9F.toInt()
+                    0xFFF0EAE0.toInt(),
+                    0xFFE2D8C8.toInt(),
+                    0xFFEDE6DA.toInt(),
+                    0xFFDCCFBE.toInt()
                 )
             }
 
-            val lightRgb = if (dark) 0x8A8CEB else 0xFFFAF2
-            val shadeRgb = if (dark) 0x05050C else 0x8A6A48
-            val lightMax = if (dark) 110f else 200f
-            val shadeMax = if (dark) 150f else 105f
+            val lightRgb = if (dark) 0x5C6B7A else 0xFFFAF2
+            val shadeRgb = if (dark) 0x040608 else 0x8A6A48
+            val lightMax = if (dark) 80f else 185f
+            val shadeMax = if (dark) 140f else 95f
 
             p.shader = LinearGradient(
                 0f, 0f, w, h,
@@ -128,8 +128,8 @@ class SilkBackgroundView(context: Context) : View(context) {
             if (!dark) return
             p.isAntiAlias = true
             p.style = Paint.Style.STROKE
-            p.strokeWidth = max(1.5f, h / 480f)
-            p.color = 0xB39EA3FF.toInt()
+            p.strokeWidth = max(1.2f, h / 520f)
+            p.color = 0x55475569
             for (f in FOLDS) {
                 path.reset()
                 path.moveTo(x0, f[0] * h)
@@ -139,4 +139,3 @@ class SilkBackgroundView(context: Context) : View(context) {
         }
     }
 }
-

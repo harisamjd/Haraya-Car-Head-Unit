@@ -13,7 +13,8 @@ import kotlin.math.*
 
 /**
  * Live OpenStreetMap Slippy Tile Renderer (tile.openstreetmap.org, z=15)
- * tanpa butuh API Key, lengkap dengan filter Dark-Mode otomotif dan fallback vektor offline.
+ * tanpa butuh API Key, lengkap dengan filter Dark-Slate otomotif (0% ungu)
+ * dan fallback vektor offline.
  */
 class MapCanvasView(context: Context) : View(context) {
 
@@ -23,12 +24,12 @@ class MapCanvasView(context: Context) : View(context) {
         private val inflightKeys = mutableSetOf<String>()
         private val executor = Executors.newFixedThreadPool(3)
 
-        // Filter matriks warna untuk mengubah tile OpenStreetMap terang menjadi Dark Mode navigasi
+        // Filter matriks warna netral Carbon-Slate (tanpa bias ungu) untuk peta Dark Mode
         private val DARK_MAP_FILTER = ColorMatrixColorFilter(
             floatArrayOf(
-                -0.82f,  0.00f,  0.00f, 0f, 215f,
-                 0.00f, -0.80f,  0.00f, 0f, 215f,
-                 0.00f,  0.00f, -0.68f, 0f, 235f,
+                -0.55f, -0.22f, -0.05f, 0f, 206f,
+                -0.18f, -0.58f, -0.05f, 0f, 212f,
+                -0.12f, -0.20f, -0.48f, 0f, 216f,
                  0.00f,  0.00f,  0.00f, 1f,   0f
             )
         )
@@ -42,10 +43,6 @@ class MapCanvasView(context: Context) : View(context) {
 
     private val tilePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val overlayPaint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val labelTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-    }
-    private val badgeRect = RectF()
 
     fun updateLocation(lat: Double, lon: Double, label: String? = null) {
         val moved = abs(lat - currentLat) > 0.0001 || abs(lon - currentLon) > 0.0001
@@ -82,7 +79,7 @@ class MapCanvasView(context: Context) : View(context) {
         if (w <= 0f || h <= 0f) return
 
         // Latar dasar peta
-        canvas.drawColor(if (palette.isDark) 0xFF141824.toInt() else 0xFFEAE8E3.toInt())
+        canvas.drawColor(if (palette.isDark) 0xFF12161B.toInt() else 0xFFEAE8E3.toInt())
 
         // Gambar tile OpenStreetMap asli
         val hasRealTiles = drawLiveOsmTiles(canvas, w, h)
@@ -92,48 +89,16 @@ class MapCanvasView(context: Context) : View(context) {
 
         // Gambar titik posisi kendaraan di tengah peta
         val carX = w * 0.50f
-        val carY = h * 0.46f
+        val carY = h * 0.50f
         overlayPaint.style = Paint.Style.FILL
         overlayPaint.color = (palette.accent and 0x00FFFFFF) or 0x44000000
-        canvas.drawCircle(carX, carY, GlassTheme.dp(context, 16f).toFloat(), overlayPaint)
+        canvas.drawCircle(carX, carY, GlassTheme.dp(context, 15f).toFloat(), overlayPaint)
 
         overlayPaint.color = 0xFFFFFFFF.toInt()
-        canvas.drawCircle(carX, carY, GlassTheme.dp(context, 7f).toFloat(), overlayPaint)
+        canvas.drawCircle(carX, carY, GlassTheme.dp(context, 6.8f).toFloat(), overlayPaint)
 
         overlayPaint.color = palette.accent
-        canvas.drawCircle(carX, carY, GlassTheme.dp(context, 4.8f).toFloat(), overlayPaint)
-
-        // Gambar pill keterangan jalan / lokasi di pojok kiri bawah dalam peta
-        if (streetLabel.isNotBlank()) {
-            val dp8 = GlassTheme.dp(context, 8f).toFloat()
-            val dp6 = GlassTheme.dp(context, 6f).toFloat()
-            labelTextPaint.textSize = GlassTheme.dp(context, 9.5f).toFloat()
-            val maxTextW = w - dp8 * 4f
-            var displayStr = "📍 $streetLabel"
-            while (labelTextPaint.measureText(displayStr) > maxTextW && displayStr.length > 10) {
-                displayStr = displayStr.dropLast(4) + "..."
-            }
-            val textW = labelTextPaint.measureText(displayStr)
-            val pillH = GlassTheme.dp(context, 20f).toFloat()
-            val pillLeft = dp6
-            val pillBottom = h - dp6
-            val pillTop = pillBottom - pillH
-            val pillRight = (pillLeft + textW + dp8 * 2f).coerceAtMost(w - dp6)
-
-            badgeRect.set(pillLeft, pillTop, pillRight, pillBottom)
-            overlayPaint.style = Paint.Style.FILL
-            overlayPaint.color = if (palette.isDark) 0xD8111420.toInt() else 0xE6FFFFFF.toInt()
-            canvas.drawRoundRect(badgeRect, pillH / 2f, pillH / 2f, overlayPaint)
-
-            overlayPaint.style = Paint.Style.STROKE
-            overlayPaint.strokeWidth = 1.2f
-            overlayPaint.color = palette.stroke
-            canvas.drawRoundRect(badgeRect, pillH / 2f, pillH / 2f, overlayPaint)
-
-            labelTextPaint.color = palette.textPrimary
-            val textY = badgeRect.centerY() - (labelTextPaint.descent() + labelTextPaint.ascent()) / 2f
-            canvas.drawText(displayStr, pillLeft + dp8, textY, labelTextPaint)
-        }
+        canvas.drawCircle(carX, carY, GlassTheme.dp(context, 4.6f).toFloat(), overlayPaint)
     }
 
     private fun drawLiveOsmTiles(canvas: Canvas, w: Float, h: Float): Boolean {
@@ -148,7 +113,7 @@ class MapCanvasView(context: Context) : View(context) {
         val offsetPxY = ((exactY - centerTileY) * 256.0).toFloat()
 
         val centerX = w * 0.50f
-        val centerY = h * 0.46f
+        val centerY = h * 0.50f
 
         var drawnCount = 0
         for (dx in -1..1) {
@@ -157,7 +122,7 @@ class MapCanvasView(context: Context) : View(context) {
                 val ty = centerTileY + dy
                 if (tx < 0 || ty < 0 || tx >= n.toInt() || ty >= n.toInt()) continue
 
-                val key = "osm_v2/$ZOOM/$tx/$ty"
+                val key = "osm_v3/$ZOOM/$tx/$ty"
                 val bmp = tileCache.get(key)
                 val left = centerX - offsetPxX + dx * 256f
                 val top = centerY - offsetPxY + dy * 256f
@@ -184,7 +149,7 @@ class MapCanvasView(context: Context) : View(context) {
                 val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
                     connectTimeout = 5000
                     readTimeout = 5000
-                    setRequestProperty("User-Agent", "HarayaDock/1.1 (https://github.com/harisamjd/Haraya-Car-Head-Unit)")
+                    setRequestProperty("User-Agent", "HarayaDock/1.2 (https://github.com/harisamjd/Haraya-Car-Head-Unit)")
                 }
                 if (conn.responseCode == 200) {
                     val bmp = conn.inputStream.use { BitmapFactory.decodeStream(it) }
@@ -214,12 +179,12 @@ class MapCanvasView(context: Context) : View(context) {
 
     private fun paintCartography(c: Canvas, w: Float, h: Float, pal: GlassPalette) {
         val d = pal.isDark
-        val base = if (d) 0xFF151824.toInt() else 0xFFEAE8E3.toInt()
-        val park = if (d) 0xFF1B2E2B.toInt() else 0xFFCDE3C3.toInt()
-        val water = if (d) 0xFF1D2F4C.toInt() else 0xFFB6D4EE.toInt()
-        val minorRoad = if (d) 0xFF25293E.toInt() else 0xFFF7F6F2.toInt()
-        val majorRoad = if (d) 0xFF323752.toInt() else 0xFFFFFFFF.toInt()
-        val roadEdge = if (d) 0xFF1F2336.toInt() else 0xFFD5D4CE.toInt()
+        val base = if (d) 0xFF12161B.toInt() else 0xFFEAE8E3.toInt()
+        val park = if (d) 0xFF182622.toInt() else 0xFFCDE3C3.toInt()
+        val water = if (d) 0xFF172736.toInt() else 0xFFB6D4EE.toInt()
+        val minorRoad = if (d) 0xFF202730.toInt() else 0xFFF7F6F2.toInt()
+        val majorRoad = if (d) 0xFF2B3440.toInt() else 0xFFFFFFFF.toInt()
+        val roadEdge = if (d) 0xFF1A2027.toInt() else 0xFFD5D4CE.toInt()
         val routeColor = pal.accent
 
         c.drawColor(base)

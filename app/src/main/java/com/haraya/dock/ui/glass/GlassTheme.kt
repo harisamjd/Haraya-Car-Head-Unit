@@ -36,58 +36,58 @@ data class GlassPalette(
 
 object GlassTheme {
 
-    // Mode Terang: Clean Alabaster Matte + Kartu Putih Tajam
+    // Mode Terang: Warm Alabaster Stone + Instrument Teal (Anti-Glare Siang Hari, 0% Ungu)
     val Light = GlassPalette(
         isDark = false,
-        windowBg = 0xFFF1F4F9.toInt(),
-        textPrimary = 0xFF111827.toInt(),
-        textSecondary = 0xFF4B5563.toInt(),
-        textMuted = 0xFF6B7280.toInt(),
-        accent = 0xFF2563EB.toInt(),
-        accentLight = 0xFF3B82F6.toInt(),
+        windowBg = 0xFFECEAE4.toInt(),
+        textPrimary = 0xFF14171A.toInt(),
+        textSecondary = 0xFF4A525A.toInt(),
+        textMuted = 0xFF68707A.toInt(),
+        accent = 0xFF0F766E.toInt(),
+        accentLight = 0xFF0D9488.toInt(),
         track = 0x20000000,
         line = 0x18000000,
-        stroke = 0xFFE2E8F0.toInt(),
+        stroke = 0xFFD8D4CA.toInt(),
         ripple = 0x1F000000,
-        cardTop = 0xFFFFFFFF.toInt(),
-        cardBottom = 0xFFF8FAFC.toInt(),
-        innerTop = 0xFFF1F5F9.toInt(),
-        innerBottom = 0xFFEFF4F8.toInt(),
-        overTop = 0xFAFFFFFF.toInt(),
-        overBottom = 0xF5F8FAFC.toInt(),
-        sidebarTop = 0xFFFFFFFF.toInt(),
-        sidebarBottom = 0xFFF8FAFC.toInt(),
-        selectTop = 0xFFDBEAFE.toInt(),
-        selectBottom = 0xFFBFDBFE.toInt(),
-        selectFg = 0xFF1D4ED8.toInt(),
-        chip = 0xFFE2E8F0.toInt()
+        cardTop = 0xFFFAF9F5.toInt(),
+        cardBottom = 0xFFF3F1EC.toInt(),
+        innerTop = 0xFFEAE7DF.toInt(),
+        innerBottom = 0xFFE4E0D7.toInt(),
+        overTop = 0xFAFAF9F5.toInt(),
+        overBottom = 0xF5F3F1EC.toInt(),
+        sidebarTop = 0xFFFAF9F5.toInt(),
+        sidebarBottom = 0xFFF3F1EC.toInt(),
+        selectTop = 0xFFD5EDE9.toInt(),
+        selectBottom = 0xFFC4E5DF.toInt(),
+        selectFg = 0xFF0F534E.toInt(),
+        chip = 0xFFE2DFD7.toInt()
     )
 
-    // Mode Gelap: Carbon Obsidian Matte + Kartu Malam Presisi
+    // Mode Gelap: Carbon Slate Matte + Warm Automotive Amber (0% AI-Slop Purple)
     val Dark = GlassPalette(
         isDark = true,
-        windowBg = 0xFF0D0F17.toInt(),
-        textPrimary = 0xFFF3F4F8.toInt(),
-        textSecondary = 0xFF9CA3AF.toInt(),
-        textMuted = 0xFF6B7280.toInt(),
-        accent = 0xFF6366F1.toInt(),
-        accentLight = 0xFF818CF8.toInt(),
+        windowBg = 0xFF0B0E11.toInt(),
+        textPrimary = 0xFFF3F5F7.toInt(),
+        textSecondary = 0xFF9BA5B1.toInt(),
+        textMuted = 0xFF6E7885.toInt(),
+        accent = 0xFFE59A28.toInt(),
+        accentLight = 0xFFF5B041.toInt(),
         track = 0x2EFFFFFF,
         line = 0x1FFFFFFF,
-        stroke = 0xFF232738.toInt(),
+        stroke = 0xFF242C35.toInt(),
         ripple = 0x2EFFFFFF,
-        cardTop = 0xFF161925.toInt(),
-        cardBottom = 0xFF131620.toInt(),
-        innerTop = 0xFF1E2231.toInt(),
-        innerBottom = 0xFF1A1E2C.toInt(),
-        overTop = 0xF21A1D2B.toInt(),
-        overBottom = 0xEB151824.toInt(),
-        sidebarTop = 0xFF161925.toInt(),
-        sidebarBottom = 0xFF12151F.toInt(),
-        selectTop = 0xFF282C4E.toInt(),
-        selectBottom = 0xFF212442.toInt(),
-        selectFg = 0xFFC7D2FE.toInt(),
-        chip = 0xFF232738.toInt()
+        cardTop = 0xFF13171C.toInt(),
+        cardBottom = 0xFF101418.toInt(),
+        innerTop = 0xFF1A2027.toInt(),
+        innerBottom = 0xFF171C22.toInt(),
+        overTop = 0xF5151A20.toInt(),
+        overBottom = 0xF011151A.toInt(),
+        sidebarTop = 0xFF13171C.toInt(),
+        sidebarBottom = 0xFF101418.toInt(),
+        selectTop = 0xFF282115.toInt(),
+        selectBottom = 0xFF201A11.toInt(),
+        selectFg = 0xFFFBBF24.toInt(),
+        chip = 0xFF202730.toInt()
     )
 
     fun dp(context: Context, value: Float): Int =
