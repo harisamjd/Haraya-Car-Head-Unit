@@ -7,6 +7,8 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.media.AudioManager
 import android.os.SystemClock
+import android.provider.Settings
+import android.text.InputFilter
 import android.text.InputType
 import android.text.TextUtils
 import android.view.Gravity
@@ -31,18 +33,20 @@ class CarCockpitView(
     private val onSwitchToClassicLayout: () -> Unit,
     private val onOpenMaps: () -> Unit,
     private val onShareLiveLocation: () -> Unit,
-    private val onRequestLocationPermission: () -> Unit,
+    private val onGpsPillClicked: () -> Unit,
     private val onOpenMusic: () -> Unit,
     private val onOpenYouTube: () -> Unit,
     private val onOpenPhone: () -> Unit,
     private val onOpenObdScreen: () -> Unit,
-    private val onOpenAppsScreen: () -> Unit,
-    private val onRequestDefaultLauncher: () -> Unit
+    private val onOpenSettingsDialog: () -> Unit,
+    private val onOpenAppsScreen: () -> Unit
 ) : LinearLayout(context) {
 
     private var palette: GlassPalette = GlassTheme.Dark
     private var quoteIdx: Int = 0
     private var seatbeltBannerDismissed: Boolean = false
+    private var isGpsActive: Boolean = false
+    private var optimisticPlayingToggle: Boolean? = null
 
     // Top Bar
     private val topBarLayout: LinearLayout
@@ -53,9 +57,9 @@ class CarCockpitView(
     private val topBrandTitleTv: TextView
     private val topBrandSubTv: TextView
     private val gpsPillTv: TextView
-    private val launcherPillTv: TextView
+    private val settingsTopBtn: TextView
 
-    // Left Column: Peta + Sholat + Perjalanan Saat Ini
+    // Left Column: (1) Peta Live + (2) Jadwal Sholat + (3) Kutipan Ayat/Doa Harian
     private val mapCard: GlassCardView
     private val mapHeaderTv: TextView
     private val mapShareBtn: TextView
@@ -69,17 +73,12 @@ class CarCockpitView(
     private val prayerSlotBoxes = mutableListOf<LinearLayout>()
     private val prayerSlotNames = mutableListOf<TextView>()
     private val prayerSlotTimes = mutableListOf<TextView>()
-    private val prayerQuoteTv: TextView
 
-    private val currentTripCard: GlassCardView
-    private val currentTripHeaderTv: TextView
-    private val tripDistValTv: TextView
-    private val tripDurValTv: TextView
-    private val tripAvgValTv: TextView
-    private val tripDistSubTv: TextView
-    private val tripDurSubTv: TextView
-    private val tripAvgSubTv: TextView
-    private val tripFootnoteTv: TextView
+    private val quoteCard: GlassCardView
+    private val quoteHeaderTitleTv: TextView
+    private val quoteCountTv: TextView
+    private val quoteBodyTv: TextView
+    private val quoteRefTv: TextView
 
     // Center Column: Alert Banner + Arc Speedometer + Car Image + Media Control
     private val alertBannerBox: LinearLayout
@@ -104,15 +103,21 @@ class CarCockpitView(
     private val mediaPlayIcon: VectorIconView
     private val mediaNextIcon: VectorIconView
 
-    // Right Column: Riwayat Perjalanan + Jadwal Servis + Cuaca
-    private val historyCard: GlassCardView
-    private val historyHeaderTv: TextView
-    private val historyCountTv: TextView
-    private val historyEmptyTv: TextView
-    private val historyListLayout: LinearLayout
+    // Right Column: (1) Ringkasan & Riwayat Perjalanan + (2) Jadwal Servis (PIN) + (3) Cuaca
+    private val tripHistoryCard: GlassCardView
+    private val tripHistoryHeaderTv: TextView
+    private val tripHistoryBadgeTv: TextView
+    private val tripDistValTv: TextView
+    private val tripDurValTv: TextView
+    private val tripAvgValTv: TextView
+    private val tripDistSubTv: TextView
+    private val tripDurSubTv: TextView
+    private val tripAvgSubTv: TextView
+    private val tripFootnoteTv: TextView
 
     private val serviceCard: GlassCardView
     private val serviceHeaderTv: TextView
+    private val servicePinBadgeTv: TextView
     private val serviceItemBoxes = mutableListOf<LinearLayout>()
     private val serviceItemIcons = mutableListOf<VectorIconView>()
     private val serviceItemTitles = mutableListOf<TextView>()
@@ -120,7 +125,6 @@ class CarCockpitView(
 
     private val weatherCard: GlassCardView
     private val weatherHeaderTv: TextView
-    private val weatherBadgeTv: TextView
     private val weatherIcon: VectorIconView
     private val weatherTempTv: TextView
     private val weatherDescTv: TextView
@@ -133,8 +137,12 @@ class CarCockpitView(
 
     init {
         orientation = VERTICAL
-        val pad = dp(10f)
-        setPadding(pad, dp(6f), pad, dp(8f))
+        val pad = dp(12f)
+        setPadding(pad, dp(8f), pad, dp(8f))
+
+        NotificationCollectorService.onMediaChangedCallback = {
+            post { refreshMediaState() }
+        }
 
         // ==========================================
         // 1. TOP STATUS & MODE BAR
@@ -147,21 +155,19 @@ class CarCockpitView(
         val themeSegmentBox = LinearLayout(context).apply {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            val p = dp(3f)
-            setPadding(p, p, p, p)
         }
         modeTerangBtn = buildModePill("Terang") { onSwitchThemeMode(ThemeMode.LIGHT) }
         modeGelapBtn = buildModePill("Gelap") { onSwitchThemeMode(ThemeMode.DARK) }
         modeAutoBtn = buildModePill("Auto") { onSwitchThemeMode(ThemeMode.AUTO) }
         themeSegmentBox.addView(modeTerangBtn)
-        themeSegmentBox.addView(modeGelapBtn, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { leftMargin = dp(3f) })
-        themeSegmentBox.addView(modeAutoBtn, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { leftMargin = dp(3f) })
+        themeSegmentBox.addView(modeGelapBtn, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { leftMargin = dp(4f) })
+        themeSegmentBox.addView(modeAutoBtn, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { leftMargin = dp(4f) })
 
         layoutSwitchBtn = TextView(context).apply {
             text = "Mode Klasik"
             textSize = 10f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-            setPadding(dp(8f), dp(4f), dp(8f), dp(4f))
+            setPadding(dp(10f), dp(4f), dp(10f), dp(4f))
             setOnClickListener { onSwitchToClassicLayout() }
         }
 
@@ -171,7 +177,7 @@ class CarCockpitView(
         }
         leftTopGroup.addView(themeSegmentBox)
         leftTopGroup.addView(layoutSwitchBtn, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-            leftMargin = dp(6f)
+            leftMargin = dp(8f)
         })
 
         val brandCenterCol = LinearLayout(context).apply {
@@ -195,30 +201,29 @@ class CarCockpitView(
 
         val rightTopGroup = LinearLayout(context).apply {
             orientation = HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
+            gravity = Gravity.END or Gravity.CENTER_VERTICAL
         }
         gpsPillTv = TextView(context).apply {
-            text = "GPS Aktif"
+            text = "● GPS Aktif"
             textSize = 10f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-            setPadding(dp(8f), dp(4f), dp(8f), dp(4f))
-            setOnClickListener { onRequestLocationPermission() }
+            setPadding(dp(10f), dp(4f), dp(10f), dp(4f))
+            setOnClickListener { onGpsPillClicked() }
         }
-        launcherPillTv = TextView(context).apply {
-            text = "Setel Beranda"
+        settingsTopBtn = TextView(context).apply {
+            text = "Setelan"
             textSize = 10f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-            setPadding(dp(8f), dp(4f), dp(8f), dp(4f))
-            setOnClickListener { onRequestDefaultLauncher() }
+            setPadding(dp(10f), dp(4f), dp(10f), dp(4f))
+            setOnClickListener { onOpenSettingsDialog() }
         }
         rightTopGroup.addView(gpsPillTv)
-        rightTopGroup.addView(launcherPillTv, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+        rightTopGroup.addView(settingsTopBtn, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
             leftMargin = dp(6f)
         })
 
         topBarLayout.addView(leftTopGroup, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.15f))
         topBarLayout.addView(brandCenterCol, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.7f))
-        rightTopGroup.gravity = Gravity.END or Gravity.CENTER_VERTICAL
         topBarLayout.addView(rightTopGroup, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.15f))
 
         addView(topBarLayout, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
@@ -232,14 +237,17 @@ class CarCockpitView(
             orientation = HORIZONTAL
         }
 
-        // --- KOLOM KIRI (Peta + Jadwal Sholat + Perjalanan Saat Ini) ---
+        val cardPadH = dp(14f)
+        val cardPadV = dp(10f)
+
+        // --- KOLOM KIRI: (1) Peta Live + (2) Jadwal Sholat + (3) Kutipan Ayat/Doa ---
         val leftCol = LinearLayout(context).apply {
             orientation = VERTICAL
         }
 
         // 2A. Kartu Peta & Share Lokasi
         mapCard = GlassCardView(context)
-        mapCard.setPadding(dp(8f), dp(6f), dp(8f), dp(6f))
+        mapCard.setPadding(cardPadH, cardPadV, cardPadH, cardPadV)
         val mapCol = LinearLayout(context).apply { orientation = VERTICAL }
         val mapHeaderRow = LinearLayout(context).apply {
             orientation = HORIZONTAL
@@ -249,21 +257,23 @@ class CarCockpitView(
             text = "PETA & LOKASI"
             textSize = 9.5f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-            letterSpacing = 0.06f
+            letterSpacing = 0.05f
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
         }
         mapShareBtn = TextView(context).apply {
             text = "Bagikan Live"
-            textSize = 9.5f
+            textSize = 9f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-            setPadding(dp(7f), dp(2f), dp(7f), dp(2f))
+            setPadding(dp(8f), dp(3f), dp(8f), dp(3f))
             setOnClickListener { onShareLiveLocation() }
         }
-        mapHeaderRow.addView(mapHeaderTv, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        mapHeaderRow.addView(mapHeaderTv, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+            rightMargin = dp(6f)
+        })
         mapHeaderRow.addView(mapShareBtn)
         mapCol.addView(mapHeaderRow, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-            bottomMargin = dp(4f)
+            bottomMargin = dp(6f)
         })
 
         mapViewport = FrameLayout(context)
@@ -273,11 +283,11 @@ class CarCockpitView(
         }
         mapViewport.addView(mapCanvas, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         mapCol.addView(mapViewport, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f).apply {
-            bottomMargin = dp(4f)
+            bottomMargin = dp(5f)
         })
 
         mapFooterTv = TextView(context).apply {
-            text = "GPS Realtime • Ketuk peta untuk Google Maps"
+            text = "Peta Live OpenStreetMap • Ketuk peta untuk navigasi"
             textSize = 8.5f
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
@@ -285,10 +295,13 @@ class CarCockpitView(
         mapCol.addView(mapFooterTv)
         mapCard.addView(mapCol, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
-        // 2B. Kartu Jadwal Sholat (Di antara Maps & Ringkasan Perjalanan)
+        // 2B. Kartu Jadwal Sholat 5 Waktu (Bersih & Rapi)
         prayerCard = GlassCardView(context)
-        prayerCard.setPadding(dp(8f), dp(6f), dp(8f), dp(6f))
-        val prayerCol = LinearLayout(context).apply { orientation = VERTICAL }
+        prayerCard.setPadding(cardPadH, cardPadV, cardPadH, cardPadV)
+        val prayerCol = LinearLayout(context).apply {
+            orientation = VERTICAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
         val prayerHeadRow = LinearLayout(context).apply {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -297,7 +310,7 @@ class CarCockpitView(
             text = "JADWAL SHOLAT"
             textSize = 9.5f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-            letterSpacing = 0.06f
+            letterSpacing = 0.05f
         }
         prayerNextTv = TextView(context).apply {
             textSize = 9.5f
@@ -308,7 +321,7 @@ class CarCockpitView(
         prayerHeadRow.addView(prayerHeaderTitleTv, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         prayerHeadRow.addView(prayerNextTv)
         prayerCol.addView(prayerHeadRow, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-            bottomMargin = dp(4f)
+            bottomMargin = dp(6f)
         })
 
         val prayerStrip = LinearLayout(context).apply { orientation = HORIZONTAL }
@@ -317,7 +330,7 @@ class CarCockpitView(
             val slot = LinearLayout(context).apply {
                 orientation = VERTICAL
                 gravity = Gravity.CENTER
-                setPadding(dp(2f), dp(3f), dp(2f), dp(3f))
+                setPadding(dp(2f), dp(5f), dp(2f), dp(5f))
             }
             val nTv = TextView(context).apply {
                 text = pNames[i]
@@ -326,122 +339,100 @@ class CarCockpitView(
             }
             val tTv = TextView(context).apply {
                 text = "--:--"
-                textSize = 10f
+                textSize = 10.5f
                 typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
                 fontFeatureSettings = "tnum"
                 gravity = Gravity.CENTER
             }
             slot.addView(nTv)
-            slot.addView(tTv)
+            slot.addView(tTv, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = dp(1f)
+            })
             prayerSlotBoxes.add(slot)
             prayerSlotNames.add(nTv)
             prayerSlotTimes.add(tTv)
             prayerStrip.addView(slot, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                if (i < pNames.lastIndex) rightMargin = dp(3f)
+                if (i < pNames.lastIndex) rightMargin = dp(4f)
             })
         }
-        prayerCol.addView(prayerStrip, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-            bottomMargin = dp(4f)
-        })
-
-        prayerQuoteTv = TextView(context).apply {
-            textSize = 9f
-            maxLines = 1
-            ellipsize = TextUtils.TruncateAt.END
-            setOnClickListener {
-                quoteIdx = (quoteIdx + 1) % QuoteRepository.count()
-                refreshQuoteText()
-            }
-        }
-        prayerCol.addView(prayerQuoteTv)
+        prayerCol.addView(prayerStrip, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         prayerCard.addView(prayerCol, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
-        // 2C. Kartu Ringkasan Perjalanan Saat Ini
-        currentTripCard = GlassCardView(context)
-        currentTripCard.setPadding(dp(8f), dp(6f), dp(8f), dp(6f))
-        currentTripCard.setOnClickListener {
-            showCurrentTripActionDialog()
+        // 2C. Kartu Kutipan Ayat / Doa Muslim (Di bawah Jadwal Sholat)
+        quoteCard = GlassCardView(context)
+        quoteCard.setPadding(cardPadH, cardPadV, cardPadH, cardPadV)
+        quoteCard.setOnClickListener {
+            quoteIdx = (quoteIdx + 1) % QuoteRepository.count()
+            refreshQuoteText()
         }
-        val tripCol = LinearLayout(context).apply {
+        val quoteCol = LinearLayout(context).apply {
             orientation = VERTICAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        currentTripHeaderTv = TextView(context).apply {
-            text = "RINGKASAN PERJALANAN"
+        val quoteHeadRow = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        quoteHeaderTitleTv = TextView(context).apply {
+            text = "KUTIPAN & DOA HARIAN"
             textSize = 9.5f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-            letterSpacing = 0.06f
+            letterSpacing = 0.05f
         }
-        tripCol.addView(currentTripHeaderTv, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+        quoteCountTv = TextView(context).apply {
+            textSize = 8.5f
+            gravity = Gravity.END
+        }
+        quoteHeadRow.addView(quoteHeaderTitleTv, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        quoteHeadRow.addView(quoteCountTv)
+        quoteCol.addView(quoteHeadRow, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
             bottomMargin = dp(3f)
         })
 
-        val tripMetricsRow = LinearLayout(context).apply { orientation = HORIZONTAL }
-        fun buildTripMetric(unitLabel: String): Pair<TextView, TextView> {
-            val box = LinearLayout(context).apply { orientation = VERTICAL }
-            val vTv = TextView(context).apply {
-                text = "—"
-                textSize = 15f
-                typeface = Typeface.create("sans-serif", Typeface.BOLD)
-                fontFeatureSettings = "tnum"
-            }
-            val uTv = TextView(context).apply {
-                text = unitLabel
-                textSize = 8.5f
-            }
-            box.addView(vTv)
-            box.addView(uTv)
-            tripMetricsRow.addView(box, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            return vTv to uTv
-        }
-        val m1 = buildTripMetric("km")
-        val m2 = buildTripMetric("jam : mnt")
-        val m3 = buildTripMetric("km/jam rata-rata")
-        tripDistValTv = m1.first; tripDistSubTv = m1.second
-        tripDurValTv = m2.first; tripDurSubTv = m2.second
-        tripAvgValTv = m3.first; tripAvgSubTv = m3.second
-        tripCol.addView(tripMetricsRow)
-
-        tripFootnoteTv = TextView(context).apply {
-            text = "Dimulai saat GPS mendeteksi gerak"
-            textSize = 8.5f
-            maxLines = 1
+        quoteBodyTv = TextView(context).apply {
+            textSize = 9.5f
+            maxLines = 2
             ellipsize = TextUtils.TruncateAt.END
         }
-        tripCol.addView(tripFootnoteTv, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+        quoteRefTv = TextView(context).apply {
+            textSize = 8.5f
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+            maxLines = 1
+        }
+        quoteCol.addView(quoteBodyTv)
+        quoteCol.addView(quoteRefTv, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
             topMargin = dp(2f)
         })
-        currentTripCard.addView(tripCol, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        quoteCard.addView(quoteCol, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
-        leftCol.addView(mapCard, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 0.44f).apply { bottomMargin = dp(6f) })
-        leftCol.addView(prayerCard, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 0.31f).apply { bottomMargin = dp(6f) })
-        leftCol.addView(currentTripCard, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 0.25f))
+        leftCol.addView(mapCard, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 0.46f).apply { bottomMargin = dp(6f) })
+        leftCol.addView(prayerCard, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 0.28f).apply { bottomMargin = dp(6f) })
+        leftCol.addView(quoteCard, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 0.26f))
 
         mainColumnsRow.addView(leftCol, LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.29f).apply {
             rightMargin = dp(8f)
         })
 
-        // --- KOLOM TENGAH (Banner Pengingat + Busur Speedometer + Gambar Mobil Baleno + Kontrol Media) ---
+        // --- KOLOM TENGAH (Banner + Busur Speedometer + Suzuki Baleno + Kontrol Media) ---
         val centerCol = LinearLayout(context).apply {
             orientation = VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
         }
 
-        // Banner Peringatan (Sabuk Pengaman / Servis Jatuh Tempo)
         alertBannerBox = LinearLayout(context).apply {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(10f), dp(5f), dp(10f), dp(5f))
+            setPadding(dp(12f), dp(5f), dp(12f), dp(5f))
         }
         val alertTextCol = LinearLayout(context).apply { orientation = VERTICAL }
         alertBannerTitleTv = TextView(context).apply {
             text = "Kenakan Sabuk Pengaman"
-            textSize = 10.5f
+            textSize = 10f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
         }
         alertBannerSubTv = TextView(context).apply {
             text = "Pastikan sabuk pengaman terpasang demi keselamatan perjalanan"
-            textSize = 9f
+            textSize = 8.5f
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
         }
@@ -464,7 +455,7 @@ class CarCockpitView(
             bottomMargin = dp(4f)
         })
 
-        // Area Instrumen Tengah: Speedometer Arc + Gambar Mobil Suzuki Baleno
+        // Area Instrumen Tengah: Busur Speedometer di atas, Mobil di separuh bawah (tidak saling menutupi)
         val centerStageFrame = FrameLayout(context)
         speedArcView = CenterSpeedArcView(context)
         centerStageFrame.addView(
@@ -479,11 +470,10 @@ class CarCockpitView(
         }
         centerStageFrame.addView(
             carImageView,
-            FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
-                topMargin = dp(68f)
-                leftMargin = dp(20f)
-                rightMargin = dp(20f)
-                bottomMargin = dp(4f)
+            FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(105f), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
+                leftMargin = dp(28f)
+                rightMargin = dp(28f)
+                bottomMargin = dp(2f)
             }
         )
 
@@ -491,13 +481,13 @@ class CarCockpitView(
             orientation = VERTICAL
         }
         carNameTv = TextView(context).apply {
-            text = "Suzuki Baleno"
-            textSize = 13f
+            text = tripServiceManager.getVehicleName()
+            textSize = 12.5f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
         }
         carSubTv = TextView(context).apply {
-            text = "Hatchback • B 1353 EYX"
-            textSize = 9.5f
+            text = tripServiceManager.getVehicleSubtitle()
+            textSize = 9f
         }
         carBadgeCol.addView(carNameTv)
         carBadgeCol.addView(carSubTv)
@@ -505,7 +495,7 @@ class CarCockpitView(
             carBadgeCol,
             FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.START).apply {
                 leftMargin = dp(6f)
-                bottomMargin = dp(4f)
+                bottomMargin = dp(2f)
             }
         )
 
@@ -515,30 +505,38 @@ class CarCockpitView(
 
         // Kartu Kontrol Media di Bawah Mobil
         mediaCard = GlassCardView(context)
-        mediaCard.setPadding(dp(12f), dp(8f), dp(12f), dp(8f))
+        mediaCard.setPadding(dp(14f), dp(9f), dp(14f), dp(9f))
         val mediaRow = LinearLayout(context).apply {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
         val mediaTextCol = LinearLayout(context).apply {
             orientation = VERTICAL
-            setOnClickListener { onOpenMusic() }
+            setOnClickListener {
+                if (!NotificationCollectorService.isNotificationAccessGranted(context)) {
+                    promptNotificationListenerAccess()
+                } else {
+                    onOpenMusic()
+                }
+            }
         }
         mediaTitleTv = TextView(context).apply {
             text = "Kontrol Media"
-            textSize = 12f
+            textSize = 11.5f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
         }
         mediaSubTv = TextView(context).apply {
             text = "Ketuk untuk membuka YouTube Music"
-            textSize = 9.5f
+            textSize = 9f
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
         }
         mediaTextCol.addView(mediaTitleTv)
-        mediaTextCol.addView(mediaSubTv)
+        mediaTextCol.addView(mediaSubTv, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            topMargin = dp(1f)
+        })
         mediaRow.addView(mediaTextCol, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
             rightMargin = dp(8f)
         })
@@ -555,10 +553,19 @@ class CarCockpitView(
             return box to ic
         }
 
-        val ytPair = buildMediaCircleBtn(VectorIconView.IconType.YOUTUBE, 32f, 16f) { onOpenYouTube() }
-        val prevPair = buildMediaCircleBtn(VectorIconView.IconType.PREV_TRACK, 32f, 15f) { sendMediaButton(KeyEvent.KEYCODE_MEDIA_PREVIOUS) }
-        val playPair = buildMediaCircleBtn(VectorIconView.IconType.PLAY_PAUSE, 38f, 18f) { sendMediaButton(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE) }
-        val nextPair = buildMediaCircleBtn(VectorIconView.IconType.NEXT_TRACK, 32f, 15f) { sendMediaButton(KeyEvent.KEYCODE_MEDIA_NEXT) }
+        val ytPair = buildMediaCircleBtn(VectorIconView.IconType.YOUTUBE, 32f, 15f) { onOpenYouTube() }
+        val prevPair = buildMediaCircleBtn(VectorIconView.IconType.PREV_TRACK, 32f, 14f) {
+            sendMediaButton(KeyEvent.KEYCODE_MEDIA_PREVIOUS)
+        }
+        val playPair = buildMediaCircleBtn(VectorIconView.IconType.PLAY_PAUSE, 38f, 17f) {
+            val currentlyPlaying = NotificationCollectorService.isCurrentlyPlaying(context)
+            optimisticPlayingToggle = !currentlyPlaying
+            refreshMediaState()
+            sendMediaButton(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
+        }
+        val nextPair = buildMediaCircleBtn(VectorIconView.IconType.NEXT_TRACK, 32f, 14f) {
+            sendMediaButton(KeyEvent.KEYCODE_MEDIA_NEXT)
+        }
 
         mediaYtBtn = ytPair.first; mediaYtIcon = ytPair.second
         mediaPrevBtn = prevPair.first; mediaPrevIcon = prevPair.second
@@ -572,62 +579,106 @@ class CarCockpitView(
             rightMargin = dp(8f)
         })
 
-        // --- KOLOM KANAN (Riwayat Perjalanan + Jadwal Servis + Cuaca) ---
+        // --- KOLOM KANAN: (1) Ringkasan & Riwayat Perjalanan + (2) Jadwal Servis (PIN) + (3) Cuaca ---
         val rightCol = LinearLayout(context).apply {
             orientation = VERTICAL
         }
 
-        // 3A. Kartu Riwayat Perjalanan
-        historyCard = GlassCardView(context)
-        historyCard.setPadding(dp(8f), dp(6f), dp(8f), dp(6f))
-        historyCard.setOnClickListener { showCurrentTripActionDialog() }
-        val histCol = LinearLayout(context).apply { orientation = VERTICAL }
-        val histHeaderRow = LinearLayout(context).apply {
+        // 3A. Kartu Ringkasan & Riwayat Perjalanan (Ketuk untuk Popup Riwayat Lengkap)
+        tripHistoryCard = GlassCardView(context)
+        tripHistoryCard.setPadding(cardPadH, cardPadV, cardPadH, cardPadV)
+        tripHistoryCard.setOnClickListener {
+            showTripHistoryPopupDialog()
+        }
+        val tripCol = LinearLayout(context).apply {
+            orientation = VERTICAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val tripHeaderRow = LinearLayout(context).apply {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        historyHeaderTv = TextView(context).apply {
+        tripHistoryHeaderTv = TextView(context).apply {
             text = "RIWAYAT PERJALANAN"
             textSize = 9.5f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-            letterSpacing = 0.06f
+            letterSpacing = 0.05f
         }
-        historyCountTv = TextView(context).apply {
-            text = "0/5"
-            textSize = 9.5f
+        tripHistoryBadgeTv = TextView(context).apply {
+            text = "0/5 • Detail"
+            textSize = 8.5f
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
             fontFeatureSettings = "tnum"
         }
-        histHeaderRow.addView(historyHeaderTv, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        histHeaderRow.addView(historyCountTv)
-        histCol.addView(histHeaderRow, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+        tripHeaderRow.addView(tripHistoryHeaderTv, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        tripHeaderRow.addView(tripHistoryBadgeTv)
+        tripCol.addView(tripHeaderRow, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
             bottomMargin = dp(4f)
         })
 
-        historyEmptyTv = TextView(context).apply {
-            text = "Belum ada riwayat perjalanan\nTersimpan otomatis setelah parkir 15 mnt"
-            textSize = 9.5f
-            gravity = Gravity.CENTER
+        val tripMetricsRow = LinearLayout(context).apply { orientation = HORIZONTAL }
+        fun buildTripMetric(unitLabel: String): Pair<TextView, TextView> {
+            val box = LinearLayout(context).apply { orientation = VERTICAL }
+            val vTv = TextView(context).apply {
+                text = "—"
+                textSize = 14.5f
+                typeface = Typeface.create("sans-serif", Typeface.BOLD)
+                fontFeatureSettings = "tnum"
+                includeFontPadding = false
+            }
+            val uTv = TextView(context).apply {
+                text = unitLabel
+                textSize = 8.5f
+                maxLines = 1
+                ellipsize = TextUtils.TruncateAt.END
+            }
+            box.addView(vTv)
+            box.addView(uTv)
+            tripMetricsRow.addView(box, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            return vTv to uTv
         }
-        historyListLayout = LinearLayout(context).apply {
-            orientation = VERTICAL
-            visibility = View.GONE
-        }
-        histCol.addView(historyEmptyTv, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-        histCol.addView(historyListLayout, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-        historyCard.addView(histCol, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        val m1 = buildTripMetric("km")
+        val m2 = buildTripMetric("jam : mnt")
+        val m3 = buildTripMetric("km/j rata-rata")
+        tripDistValTv = m1.first; tripDistSubTv = m1.second
+        tripDurValTv = m2.first; tripDurSubTv = m2.second
+        tripAvgValTv = m3.first; tripAvgSubTv = m3.second
+        tripCol.addView(tripMetricsRow)
 
-        // 3B. Kartu Jadwal Servis (Grid 2x2: Oli Mesin, Oli Matic, Servis AC, Tuneup)
+        tripFootnoteTv = TextView(context).apply {
+            text = "Ketuk untuk melihat daftar Riwayat Perjalanan"
+            textSize = 8.5f
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+        }
+        tripCol.addView(tripFootnoteTv, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            topMargin = dp(3f)
+        })
+        tripHistoryCard.addView(tripCol, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+
+        // 3B. Kartu Jadwal Servis (Grid 2x2 dengan proteksi PIN)
         serviceCard = GlassCardView(context)
-        serviceCard.setPadding(dp(8f), dp(6f), dp(8f), dp(6f))
+        serviceCard.setPadding(cardPadH, cardPadV, cardPadH, cardPadV)
         val svcCol = LinearLayout(context).apply { orientation = VERTICAL }
+        val svcHeadRow = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
         serviceHeaderTv = TextView(context).apply {
-            text = "JADWAL SERVIS (KETUK UNTUK ATUR)"
+            text = "JADWAL SERVIS"
             textSize = 9.5f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-            letterSpacing = 0.06f
+            letterSpacing = 0.05f
         }
-        svcCol.addView(serviceHeaderTv, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-            bottomMargin = dp(4f)
+        servicePinBadgeTv = TextView(context).apply {
+            text = "🔒 PIN"
+            textSize = 8.5f
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+        }
+        svcHeadRow.addView(serviceHeaderTv, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        svcHeadRow.addView(servicePinBadgeTv)
+        svcCol.addView(svcHeadRow, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            bottomMargin = dp(6f)
         })
 
         val svcIcons = listOf(
@@ -643,24 +694,24 @@ class CarCockpitView(
                 val itemBox = LinearLayout(context).apply {
                     orientation = VERTICAL
                     gravity = Gravity.CENTER
-                    setPadding(dp(4f), dp(4f), dp(4f), dp(4f))
-                    setOnClickListener { showEditServiceDialog(idx) }
+                    setPadding(dp(6f), dp(5f), dp(6f), dp(5f))
+                    setOnClickListener { promptPinBeforeEditService(idx) }
                 }
                 val ic = VectorIconView(context, svcIcons[idx])
                 val titleTv = TextView(context).apply {
-                    textSize = 10.5f
+                    textSize = 10f
                     typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
                     gravity = Gravity.CENTER
                     maxLines = 1
                 }
                 val statTv = TextView(context).apply {
-                    textSize = 9f
+                    textSize = 8.5f
                     fontFeatureSettings = "tnum"
                     gravity = Gravity.CENTER
                     maxLines = 1
                     ellipsize = TextUtils.TruncateAt.END
                 }
-                itemBox.addView(ic, LayoutParams(dp(16f), dp(16f)))
+                itemBox.addView(ic, LayoutParams(dp(15f), dp(15f)))
                 itemBox.addView(titleTv, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                     topMargin = dp(2f)
                 })
@@ -672,42 +723,30 @@ class CarCockpitView(
                 serviceItemStatuses.add(statTv)
 
                 rBox.addView(itemBox, LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f).apply {
-                    if (colIdx == 0) rightMargin = dp(5f)
+                    if (colIdx == 0) rightMargin = dp(6f)
                 })
             }
             svcCol.addView(rBox, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f).apply {
-                if (rowIdx == 0) bottomMargin = dp(5f)
+                if (rowIdx == 0) bottomMargin = dp(6f)
             })
         }
         serviceCard.addView(svcCol, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
-        // 3C. Kartu Cuaca Open-Meteo
+        // 3C. Kartu Cuaca Open-Meteo (Tanpa tulisan LIVE)
         weatherCard = GlassCardView(context)
-        weatherCard.setPadding(dp(10f), dp(6f), dp(10f), dp(6f))
+        weatherCard.setPadding(cardPadH, cardPadV, cardPadH, cardPadV)
         val wCol = LinearLayout(context).apply {
             orientation = VERTICAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        val wHeadRow = LinearLayout(context).apply {
-            orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
         weatherHeaderTv = TextView(context).apply {
             text = "CUACA"
             textSize = 9.5f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-            letterSpacing = 0.06f
+            letterSpacing = 0.05f
         }
-        weatherBadgeTv = TextView(context).apply {
-            text = "LIVE"
-            textSize = 8.5f
-            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-            setPadding(dp(6f), dp(1f), dp(6f), dp(1f))
-        }
-        wHeadRow.addView(weatherHeaderTv, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        wHeadRow.addView(weatherBadgeTv)
-        wCol.addView(wHeadRow, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-            bottomMargin = dp(2f)
+        wCol.addView(weatherHeaderTv, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            bottomMargin = dp(3f)
         })
 
         val wBodyRow = LinearLayout(context).apply {
@@ -715,20 +754,20 @@ class CarCockpitView(
             gravity = Gravity.CENTER_VERTICAL
         }
         weatherIcon = VectorIconView(context, VectorIconView.IconType.CLOUD_SUN)
-        wBodyRow.addView(weatherIcon, LayoutParams(dp(26f), dp(26f)).apply {
-            rightMargin = dp(8f)
+        wBodyRow.addView(weatherIcon, LayoutParams(dp(24f), dp(24f)).apply {
+            rightMargin = dp(10f)
         })
         val wTextCol = LinearLayout(context).apply { orientation = VERTICAL }
         weatherTempTv = TextView(context).apply {
             text = "28°C"
-            textSize = 18f
+            textSize = 17f
             typeface = Typeface.create("sans-serif", Typeface.BOLD)
             fontFeatureSettings = "tnum"
             includeFontPadding = false
         }
         weatherDescTv = TextView(context).apply {
             text = "Cerah Berawan • Open-Meteo"
-            textSize = 9f
+            textSize = 8.5f
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
         }
@@ -738,9 +777,9 @@ class CarCockpitView(
         wCol.addView(wBodyRow)
         weatherCard.addView(wCol, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
-        rightCol.addView(historyCard, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 0.29f).apply { bottomMargin = dp(6f) })
+        rightCol.addView(tripHistoryCard, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 0.30f).apply { bottomMargin = dp(6f) })
         rightCol.addView(serviceCard, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 0.48f).apply { bottomMargin = dp(6f) })
-        rightCol.addView(weatherCard, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 0.23f))
+        rightCol.addView(weatherCard, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 0.22f))
 
         mainColumnsRow.addView(rightCol, LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.29f))
 
@@ -752,7 +791,7 @@ class CarCockpitView(
         // 3. BOTTOM NAVIGATION DOCK BAR
         // ==========================================
         bottomDockCard = GlassCardView(context)
-        bottomDockCard.setPadding(dp(8f), dp(4f), dp(8f), dp(4f))
+        bottomDockCard.setPadding(dp(10f), dp(5f), dp(10f), dp(5f))
         val dockRow = LinearLayout(context).apply {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -763,6 +802,7 @@ class CarCockpitView(
             Triple(VectorIconView.IconType.MUSIC, "MEDIA") { onOpenMusic() },
             Triple(VectorIconView.IconType.PHONE, "TELEPON") { onOpenPhone() },
             Triple(VectorIconView.IconType.GAUGE, "OBD & MESIN") { onOpenObdScreen() },
+            Triple(VectorIconView.IconType.GEAR_COG, "SETELAN") { onOpenSettingsDialog() },
             Triple(VectorIconView.IconType.APPS_GRID, "APLIKASI") { onOpenAppsScreen() }
         )
 
@@ -771,17 +811,17 @@ class CarCockpitView(
             val tab = LinearLayout(context).apply {
                 orientation = HORIZONTAL
                 gravity = Gravity.CENTER
-                setPadding(dp(10f), dp(6f), dp(10f), dp(6f))
+                setPadding(dp(8f), dp(6f), dp(8f), dp(6f))
                 setOnClickListener { spec.third.invoke() }
             }
             val ic = VectorIconView(context, spec.first)
             val lbl = TextView(context).apply {
                 text = spec.second
-                textSize = 10.5f
+                textSize = 10f
                 typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-                letterSpacing = 0.06f
+                letterSpacing = 0.05f
             }
-            tab.addView(ic, LayoutParams(dp(15f), dp(15f)).apply { rightMargin = dp(6f) })
+            tab.addView(ic, LayoutParams(dp(14f), dp(14f)).apply { rightMargin = dp(5f) })
             tab.addView(lbl)
 
             dockTabBoxes.add(tab)
@@ -789,7 +829,7 @@ class CarCockpitView(
             dockTabLabels.add(lbl)
 
             dockRow.addView(tab, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                if (i < dockSpecs.lastIndex) rightMargin = dp(6f)
+                if (i < dockSpecs.lastIndex) rightMargin = dp(4f)
             })
         }
         bottomDockCard.addView(dockRow, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
@@ -801,7 +841,7 @@ class CarCockpitView(
             text = label
             textSize = 10f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-            setPadding(dp(8f), dp(3f), dp(8f), dp(3f))
+            setPadding(dp(9f), dp(4f), dp(9f), dp(4f))
             setOnClickListener { onClick() }
         }
     }
@@ -811,11 +851,38 @@ class CarCockpitView(
         val now = SystemClock.uptimeMillis()
         am.dispatchMediaKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN, keyCode, 0))
         am.dispatchMediaKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_UP, keyCode, 0))
-        postDelayed({ refreshMediaText() }, 250L)
+        postDelayed({
+            optimisticPlayingToggle = null
+            NotificationCollectorService.pollNow(context)
+            refreshMediaState()
+        }, 450L)
     }
 
     fun updateSpeed(kmh: Int) {
         speedArcView.setSpeed(kmh)
+    }
+
+    fun updateGpsStatus(enabled: Boolean) {
+        isGpsActive = enabled
+        styleGpsPill()
+    }
+
+    private fun styleGpsPill() {
+        if (isGpsActive) {
+            gpsPillTv.text = "● GPS Aktif"
+            gpsPillTv.background = GlassTheme.innerDrawable(context, palette, 8f)
+            gpsPillTv.setTextColor(if (palette.isDark) 0xFF4ADE80.toInt() else 0xFF15803D.toInt())
+        } else {
+            gpsPillTv.text = "○ GPS Nonaktif"
+            val offBg = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp(8f).toFloat()
+                setColor(if (palette.isDark) 0x38EF4444 else 0x26EF4444)
+                setStroke(dp(1f), 0xFFEF4444.toInt())
+            }
+            gpsPillTv.background = offBg
+            gpsPillTv.setTextColor(if (palette.isDark) 0xFFFCA5A5.toInt() else 0xFFB91C1C.toInt())
+        }
     }
 
     fun updateClockAndPrayer(clockStr: String, prayers: PrayerCalc.PrayerTimes) {
@@ -842,85 +909,51 @@ class CarCockpitView(
             }
         }
         refreshQuoteText()
-        refreshMediaText()
+        NotificationCollectorService.pollNow(context)
+        refreshMediaState()
     }
 
-    fun updateLocationInfo(placeTitle: String, coordSub: String) {
+    fun updateLocationInfo(lat: Double, lon: Double, placeTitle: String, streetDetail: String, coordSub: String) {
         mapHeaderTv.text = placeTitle.uppercase(Locale.getDefault())
         mapFooterTv.text = coordSub
+        mapCanvas.updateLocation(lat, lon, streetDetail.ifBlank { placeTitle })
     }
 
     fun updateWeather(weather: WeatherState) {
         weatherTempTv.text = "${weather.tempCelsius}°C"
         weatherDescTv.text = weather.conditionLabel
-        weatherBadgeTv.text = if (weather.isLive) "LIVE" else "CACHE"
+    }
+
+    fun refreshVehicleIdentity() {
+        carNameTv.text = tripServiceManager.getVehicleName()
+        carSubTv.text = tripServiceManager.getVehicleSubtitle()
     }
 
     fun refreshTripAndServices() {
         val cur = tripServiceManager.getCurrentTripState()
+        val history = tripServiceManager.getTripHistory()
+        tripHistoryBadgeTv.text = "${history.size}/5 • Detail"
+
         if (cur.hasStarted) {
             tripDistValTv.text = String.format(Locale("id", "ID"), "%.1f", cur.distanceKm)
             val h = cur.durationMinutes / 60
             val m = cur.durationMinutes % 60
             tripDurValTv.text = String.format(Locale.US, "%02d:%02d", h, m)
             tripAvgValTv.text = cur.avgSpeedKmh.toString()
-            tripFootnoteTv.text = "Perjalanan aktif • Ketuk kartu untuk simpan/reset"
+            tripFootnoteTv.text = "Perjalanan aktif • Ketuk kartu untuk Riwayat"
+        } else if (history.isNotEmpty()) {
+            val latest = history.first()
+            tripDistValTv.text = String.format(Locale("id", "ID"), "%.1f", latest.distanceKm)
+            val h = latest.durationMinutes / 60
+            val m = latest.durationMinutes % 60
+            tripDurValTv.text = String.format(Locale.US, "%02d:%02d", h, m)
+            tripAvgValTv.text = latest.avgSpeedKmh.toString()
+            tripFootnoteTv.text = "Terakhir (${latest.dateLabel}) • Ketuk untuk semua riwayat"
         } else {
             tripDistValTv.text = "—"
             tripDurValTv.text = "—"
             tripAvgValTv.text = "—"
-            tripFootnoteTv.text = "Dimulai saat GPS mendeteksi gerak"
-        }
-
-        val history = tripServiceManager.getTripHistory()
-        historyCountTv.text = "${history.size}/5"
-        if (history.isEmpty()) {
-            historyEmptyTv.visibility = View.VISIBLE
-            historyListLayout.visibility = View.GONE
-        } else {
-            historyEmptyTv.visibility = View.GONE
-            historyListLayout.visibility = View.VISIBLE
-            historyListLayout.removeAllViews()
-            for (item in history) {
-                val r = LinearLayout(context).apply {
-                    orientation = HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
-                    setPadding(0, dp(1f), 0, dp(1f))
-                }
-                val dTv = TextView(context).apply {
-                    text = item.dateLabel
-                    textSize = 9f
-                    fontFeatureSettings = "tnum"
-                    setTextColor(palette.textSecondary)
-                }
-                val distTv = TextView(context).apply {
-                    text = String.format(Locale("id", "ID"), "%.1f km", item.distanceKm)
-                    textSize = 9.5f
-                    typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-                    fontFeatureSettings = "tnum"
-                    gravity = Gravity.END
-                    setTextColor(palette.textPrimary)
-                }
-                val durTv = TextView(context).apply {
-                    text = "${item.durationMinutes}m"
-                    textSize = 9f
-                    fontFeatureSettings = "tnum"
-                    gravity = Gravity.END
-                    setTextColor(palette.textSecondary)
-                }
-                val avgTv = TextView(context).apply {
-                    text = "${item.avgSpeedKmh} km/j"
-                    textSize = 9f
-                    fontFeatureSettings = "tnum"
-                    gravity = Gravity.END
-                    setTextColor(palette.textSecondary)
-                }
-                r.addView(dTv, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.3f))
-                r.addView(distTv, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.9f))
-                r.addView(durTv, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.6f))
-                r.addView(avgTv, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.9f))
-                historyListLayout.addView(r)
-            }
+            tripFootnoteTv.text = "Dimulai saat GPS gerak • Ketuk untuk lihat riwayat"
         }
 
         val services = tripServiceManager.getServiceItems()
@@ -989,20 +1022,95 @@ class CarCockpitView(
 
     private fun refreshQuoteText() {
         val q = QuoteRepository.getQuote(quoteIdx)
-        prayerQuoteTv.text = "\"${q.translation}\" (${q.reference})"
-        prayerQuoteTv.setTextColor(palette.textSecondary)
+        quoteCountTv.text = "${quoteIdx + 1}/${QuoteRepository.count()} • Ketuk"
+        quoteBodyTv.text = "\"${q.translation}\""
+        quoteRefTv.text = q.reference
+        quoteCountTv.setTextColor(palette.textMuted)
+        quoteBodyTv.setTextColor(palette.textPrimary)
+        quoteRefTv.setTextColor(palette.accent)
     }
 
-    private fun refreshMediaText() {
+    fun refreshMediaState() {
+        val playing = optimisticPlayingToggle ?: NotificationCollectorService.isCurrentlyPlaying(context)
+        mediaPlayIcon.setIcon(
+            if (playing) VectorIconView.IconType.PAUSE else VectorIconView.IconType.PLAY_PAUSE
+        )
+
         val title = NotificationCollectorService.currentMediaTitle
         val artist = NotificationCollectorService.currentMediaArtist
+        val hasAccess = NotificationCollectorService.isNotificationAccessGranted(context)
+
         if (!title.isNullOrBlank()) {
             mediaTitleTv.text = title
-            mediaSubTv.text = artist ?: "Memutar Media"
+            val statePrefix = if (playing) "▶ " else "⏸ "
+            mediaSubTv.text = statePrefix + (artist ?: "Media Aktif")
+        } else if (!hasAccess) {
+            mediaTitleTv.text = if (playing) "Musik Sedang Berputar" else "Kontrol Media"
+            mediaSubTv.text = "Ketuk di sini untuk izinkan akses info judul lagu"
         } else {
-            mediaTitleTv.text = "Kontrol Media"
-            mediaSubTv.text = "Kontrol sistem • ketuk untuk buka YouTube Music"
+            mediaTitleTv.text = if (playing) "Musik Sedang Berputar" else "Kontrol Media"
+            mediaSubTv.text = "Ketuk untuk membuka YouTube Music"
         }
+    }
+
+    private fun promptNotificationListenerAccess() {
+        val themeStyle = if (palette.isDark) {
+            android.R.style.Theme_DeviceDefault_Dialog_Alert
+        } else {
+            android.R.style.Theme_DeviceDefault_Light_Dialog_Alert
+        }
+        AlertDialog.Builder(context, themeStyle)
+            .setTitle("Aktifkan Info Judul Lagu")
+            .setMessage("Agar Haraya Dock dapat menampilkan judul lagu & nama penyanyi dari YouTube Music / Spotify secara real-time, aktifkan izin Akses Notifikasi untuk Haraya Dock.")
+            .setPositiveButton("Buka Pengaturan Izin") { _, _ ->
+                runCatching {
+                    context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    })
+                }
+            }
+            .setNeutralButton("Tetap Buka Musik") { _, _ ->
+                onOpenMusic()
+            }
+            .setNegativeButton("Batal", null)
+            .show()
+    }
+
+    private fun promptPinBeforeEditService(serviceIndex: Int) {
+        val item = tripServiceManager.getServiceItems().getOrNull(serviceIndex) ?: return
+        val themeStyle = if (palette.isDark) {
+            android.R.style.Theme_DeviceDefault_Dialog_Alert
+        } else {
+            android.R.style.Theme_DeviceDefault_Light_Dialog_Alert
+        }
+
+        val pinInput = EditText(context).apply {
+            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
+            hint = "Masukkan PIN (Default: 0000)"
+            filters = arrayOf(InputFilter.LengthFilter(8))
+            gravity = Gravity.CENTER
+            textSize = 16f
+        }
+        val box = FrameLayout(context).apply {
+            val p = dp(20f)
+            setPadding(p, dp(10f), p, 0)
+            addView(pinInput)
+        }
+
+        AlertDialog.Builder(context, themeStyle)
+            .setTitle("Verifikasi PIN Servis (${item.title})")
+            .setMessage("Masukkan PIN keamanan untuk mengatur atau mereset pengingat jadwal servis:")
+            .setView(box)
+            .setPositiveButton("Lanjut") { _, _ ->
+                val entered = pinInput.text?.toString().orEmpty()
+                if (tripServiceManager.verifyServicePin(entered)) {
+                    showEditServiceDialog(serviceIndex)
+                } else {
+                    Toast.makeText(context, "PIN salah! PIN default adalah 0000 (bisa diubah di menu Setelan).", Toast.LENGTH_LONG).show()
+                }
+            }
+            .setNegativeButton("Batal", null)
+            .show()
     }
 
     private fun showEditServiceDialog(index: Int) {
@@ -1019,13 +1127,13 @@ class CarCockpitView(
             hint = "Masukkan sisa ${item.unitType} (mis. ${item.defaultTarget})"
         }
         val box = FrameLayout(context).apply {
-            val p = dp(16f)
+            val p = dp(18f)
             setPadding(p, dp(8f), p, 0)
             addView(input)
         }
 
         AlertDialog.Builder(context, themeStyle)
-            .setTitle("Atur Pengingat: ${item.title}")
+            .setTitle("Atur Jadwal Servis: ${item.title}")
             .setMessage("Masukkan sisa ${item.unitType} menuju servis berikutnya (isi 0 untuk simulasi Jatuh Tempo):")
             .setView(box)
             .setPositiveButton("Simpan") { _, _ ->
@@ -1033,7 +1141,7 @@ class CarCockpitView(
                 tripServiceManager.updateServiceValue(item.id, v)
                 refreshTripAndServices()
             }
-            .setNeutralButton("Reset Baru (${item.defaultTarget} ${item.unitType})") { _, _ ->
+            .setNeutralButton("Reset Standar (${item.defaultTarget} ${item.unitType})") { _, _ ->
                 tripServiceManager.updateServiceValue(item.id, item.defaultTarget)
                 refreshTripAndServices()
             }
@@ -1041,38 +1149,75 @@ class CarCockpitView(
             .show()
     }
 
-    private fun showCurrentTripActionDialog() {
+    private fun showTripHistoryPopupDialog() {
         val themeStyle = if (palette.isDark) {
             android.R.style.Theme_DeviceDefault_Dialog_Alert
         } else {
             android.R.style.Theme_DeviceDefault_Light_Dialog_Alert
         }
-        val options = arrayOf(
-            "Simpan Perjalanan Saat Ini ke Riwayat",
-            "Bersihkan Semua Riwayat Perjalanan"
-        )
-        AlertDialog.Builder(context, themeStyle)
-            .setTitle("Kelola Catatan Perjalanan")
-            .setItems(options) { _, which ->
-                if (which == 0) {
-                    val ok = tripServiceManager.saveCurrentTripToHistory()
-                    if (!ok) {
-                        Toast.makeText(context, "Belum ada perjalanan aktif (minimal bergerak 100 meter)", Toast.LENGTH_SHORT).show()
-                    }
-                    refreshTripAndServices()
-                } else {
-                    tripServiceManager.clearTripHistory()
-                    refreshTripAndServices()
-                }
+
+        val cur = tripServiceManager.getCurrentTripState()
+        val history = tripServiceManager.getTripHistory()
+
+        val sb = StringBuilder()
+        sb.append("● PERJALANAN SAAT INI (TERBARU)\n")
+        if (cur.hasStarted) {
+            val h = cur.durationMinutes / 60
+            val m = cur.durationMinutes % 60
+            sb.append(
+                String.format(
+                    Locale("id", "ID"),
+                    "   Jarak: %.1f km  |  Waktu: %02d:%02d  |  Rata-rata: %d km/jam\n\n",
+                    cur.distanceKm, h, m, cur.avgSpeedKmh
+                )
+            )
+        } else {
+            sb.append("   Belum ada pergerakan aktif (otomatis mulai saat mobil berjalan).\n\n")
+        }
+
+        sb.append("● DAFTAR RIWAYAT TERSIMPAN (${history.size}/5)\n")
+        sb.append("   (Otomatis tersimpan setelah parkir 15 menit)\n")
+        if (history.isEmpty()) {
+            sb.append("   — Belum ada riwayat perjalanan tersimpan —")
+        } else {
+            for ((idx, item) in history.withIndex()) {
+                sb.append(
+                    String.format(
+                        Locale("id", "ID"),
+                        "   %d. [%s]  %.1f km  •  %d mnt  •  %d km/jam\n",
+                        idx + 1, item.dateLabel, item.distanceKm, item.durationMinutes, item.avgSpeedKmh
+                    )
+                )
             }
-            .setNegativeButton("Tutup", null)
-            .show()
+        }
+
+        val builder = AlertDialog.Builder(context, themeStyle)
+            .setTitle("Ringkasan & Riwayat Perjalanan")
+            .setMessage(sb.toString().trimEnd())
+            .setPositiveButton("Tutup", null)
+
+        if (cur.hasStarted) {
+            builder.setNeutralButton("Simpan Perjalanan Saat Ini") { _, _ ->
+                tripServiceManager.saveCurrentTripToHistory()
+                refreshTripAndServices()
+                Toast.makeText(context, "Perjalanan berhasil disimpan ke Riwayat", Toast.LENGTH_SHORT).show()
+            }
+        }
+        if (history.isNotEmpty()) {
+            builder.setNegativeButton("Hapus Riwayat") { _, _ ->
+                tripServiceManager.clearTripHistory()
+                refreshTripAndServices()
+                Toast.makeText(context, "Riwayat perjalanan dibersihkan", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        builder.show()
     }
 
-    fun applyTheme(newPalette: GlassPalette, currentMode: ThemeMode, isDefaultLauncher: Boolean) {
+    fun applyTheme(newPalette: GlassPalette, currentMode: ThemeMode, gpsEnabled: Boolean) {
         palette = newPalette
+        isGpsActive = gpsEnabled
 
-        // Top Bar Pills
         fun styleModeBtn(btn: TextView, active: Boolean) {
             if (active) {
                 btn.background = GlassTheme.selectDrawable(context, palette, 8f)
@@ -1093,16 +1238,11 @@ class CarCockpitView(
         topBrandTitleTv.setTextColor(palette.textPrimary)
         topBrandSubTv.setTextColor(palette.textMuted)
 
-        gpsPillTv.background = GlassTheme.innerDrawable(context, palette, 8f)
-        gpsPillTv.setTextColor(if (palette.isDark) 0xFF4ADE80.toInt() else 0xFF15803D.toInt())
+        styleGpsPill()
 
-        launcherPillTv.text = if (isDefaultLauncher) "Beranda Aktif" else "Setel Beranda"
-        launcherPillTv.background = if (isDefaultLauncher) {
-            GlassTheme.innerDrawable(context, palette, 8f)
-        } else {
-            GlassTheme.selectDrawable(context, palette, 8f)
-        }
-        launcherPillTv.setTextColor(if (isDefaultLauncher) palette.textSecondary else palette.selectFg)
+        settingsTopBtn.background = GlassTheme.innerDrawable(context, palette, 8f)
+        settingsTopBtn.setTextColor(palette.textPrimary)
+        GlassTheme.makePressable(context, settingsTopBtn, palette, 8f)
 
         // Left Column
         mapCard.applyTheme(palette)
@@ -1115,20 +1255,14 @@ class CarCockpitView(
         prayerCard.applyTheme(palette)
         prayerHeaderTitleTv.setTextColor(palette.textSecondary)
         prayerNextTv.setTextColor(palette.accent)
-        refreshQuoteText()
 
-        currentTripCard.applyTheme(palette)
-        currentTripHeaderTv.setTextColor(palette.textSecondary)
-        tripDistValTv.setTextColor(palette.textPrimary)
-        tripDurValTv.setTextColor(palette.textPrimary)
-        tripAvgValTv.setTextColor(palette.textPrimary)
-        tripDistSubTv.setTextColor(palette.textSecondary)
-        tripDurSubTv.setTextColor(palette.textSecondary)
-        tripAvgSubTv.setTextColor(palette.textSecondary)
-        tripFootnoteTv.setTextColor(palette.textMuted)
+        quoteCard.applyTheme(palette)
+        quoteHeaderTitleTv.setTextColor(palette.textSecondary)
+        refreshQuoteText()
 
         // Center Column
         speedArcView.applyTheme(palette)
+        refreshVehicleIdentity()
         carNameTv.setTextColor(palette.textPrimary)
         carSubTv.setTextColor(palette.textSecondary)
 
@@ -1147,18 +1281,23 @@ class CarCockpitView(
         mediaNextIcon.setTint(palette.textPrimary)
 
         // Right Column
-        historyCard.applyTheme(palette)
-        historyHeaderTv.setTextColor(palette.textSecondary)
-        historyCountTv.setTextColor(palette.textMuted)
-        historyEmptyTv.setTextColor(palette.textMuted)
+        tripHistoryCard.applyTheme(palette)
+        tripHistoryHeaderTv.setTextColor(palette.textSecondary)
+        tripHistoryBadgeTv.setTextColor(palette.accent)
+        tripDistValTv.setTextColor(palette.textPrimary)
+        tripDurValTv.setTextColor(palette.textPrimary)
+        tripAvgValTv.setTextColor(palette.textPrimary)
+        tripDistSubTv.setTextColor(palette.textSecondary)
+        tripDurSubTv.setTextColor(palette.textSecondary)
+        tripAvgSubTv.setTextColor(palette.textSecondary)
+        tripFootnoteTv.setTextColor(palette.textMuted)
 
         serviceCard.applyTheme(palette)
         serviceHeaderTv.setTextColor(palette.textSecondary)
+        servicePinBadgeTv.setTextColor(palette.textMuted)
 
         weatherCard.applyTheme(palette)
         weatherHeaderTv.setTextColor(palette.textSecondary)
-        weatherBadgeTv.background = GlassTheme.selectDrawable(context, palette, 6f)
-        weatherBadgeTv.setTextColor(palette.selectFg)
         weatherIcon.setTint(palette.accent)
         weatherTempTv.setTextColor(palette.textPrimary)
         weatherDescTv.setTextColor(palette.textSecondary)
@@ -1180,6 +1319,7 @@ class CarCockpitView(
         }
 
         refreshTripAndServices()
+        refreshMediaState()
     }
 
     private fun dp(value: Float): Int = GlassTheme.dp(context, value)

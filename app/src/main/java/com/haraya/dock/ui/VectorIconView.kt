@@ -39,10 +39,12 @@ class VectorIconView(
         CLOUD_SUN,
         PREV_TRACK,
         PLAY_PAUSE,
+        PAUSE,
         NEXT_TRACK,
         ROUTE,
         BELL,
-        LAYOUT_SWITCH
+        LAYOUT_SWITCH,
+        LOCK
     }
 
     private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -340,6 +342,14 @@ class VectorIconView(
                 canvas.drawPath(path, fillPaint)
             }
 
+            IconType.PAUSE -> {
+                // Dua batang vertikal Pause (||)
+                rect.set(cx - 5f * u, cy - 5.5f * u, cx - 1.6f * u, cy + 5.5f * u)
+                canvas.drawRoundRect(rect, 1.2f * u, 1.2f * u, fillPaint)
+                rect.set(cx + 1.6f * u, cy - 5.5f * u, cx + 5f * u, cy + 5.5f * u)
+                canvas.drawRoundRect(rect, 1.2f * u, 1.2f * u, fillPaint)
+            }
+
             IconType.NEXT_TRACK -> {
                 // Lagu berikutnya
                 canvas.drawLine(cx + 5.5f * u, cy - 5f * u, cx + 5.5f * u, cy + 5f * u, strokePaint)
@@ -377,6 +387,15 @@ class VectorIconView(
                 canvas.drawRoundRect(rect, 2f * u, 2f * u, strokePaint)
                 canvas.drawLine(cx - 2.5f * u, cy - 5.5f * u, cx - 2.5f * u, cy + 5.5f * u, strokePaint)
                 canvas.drawLine(cx + 2.5f * u, cy - 5.5f * u, cx + 2.5f * u, cy + 5.5f * u, strokePaint)
+            }
+
+            IconType.LOCK -> {
+                // Gembok PIN
+                rect.set(cx - 6f * u, cy - 1f * u, cx + 6f * u, cy + 7.5f * u)
+                canvas.drawRoundRect(rect, 2f * u, 2f * u, strokePaint)
+                rect.set(cx - 3.8f * u, cy - 7.5f * u, cx + 3.8f * u, cy + 0.5f * u)
+                canvas.drawArc(rect, 180f, 180f, false, strokePaint)
+                canvas.drawCircle(cx, cy + 3.2f * u, 1.4f * u, fillPaint)
             }
         }
     }

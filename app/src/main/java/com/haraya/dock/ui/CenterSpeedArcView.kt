@@ -12,7 +12,7 @@ import kotlin.math.sin
 /**
  * Busur Speedometer Atas (0..200 km/jam) bergaya kokpit AstroCar/Instrument Cluster
  * yang membingkai bagian atas ilustrasi mobil, lengkap dengan angka kecepatan,
- * satuan km/jam, jam digital, dan label GPS SPEED.
+ * satuan km/jam, jam digital, dan label GPS SPEED di paruh atas busur.
  */
 class CenterSpeedArcView(context: Context) : View(context) {
 
@@ -92,10 +92,10 @@ class CenterSpeedArcView(context: Context) : View(context) {
         val startAngle = 170f
         val totalSweep = 200f
 
-        val radius = min(w * 0.44f, h * 0.86f)
-        val strokeW = (radius * 0.095f).coerceIn(8f, 22f)
+        val radius = min(w * 0.44f, h * 0.84f)
+        val strokeW = (radius * 0.09f).coerceIn(8f, 20f)
         val cx = w / 2f
-        val cy = radius + strokeW * 0.9f
+        val cy = radius + strokeW * 0.85f
 
         arcRect.set(cx - radius, cy - radius, cx + radius, cy + radius)
         bgArcPaint.strokeWidth = strokeW
@@ -132,11 +132,11 @@ class CenterSpeedArcView(context: Context) : View(context) {
 
         // Tanda skala & angka (0, 20, 40, ..., 200)
         val tickOuter = radius - strokeW * 0.55f
-        val tickMajorInner = radius - strokeW * 1.25f
-        val tickMinorInner = radius - strokeW * 0.95f
-        val textRadius = radius - strokeW * 2.05f
+        val tickMajorInner = radius - strokeW * 1.22f
+        val tickMinorInner = radius - strokeW * 0.92f
+        val textRadius = radius - strokeW * 1.98f
 
-        scaleTextPaint.textSize = (radius * 0.072f).coerceIn(11f, 22f)
+        scaleTextPaint.textSize = (radius * 0.068f).coerceIn(10f, 20f)
         scaleTextPaint.color = palette.textSecondary
 
         for (spd in 0..200 step 10) {
@@ -168,28 +168,28 @@ class CenterSpeedArcView(context: Context) : View(context) {
             }
         }
 
-        // Teks Kecepatan Besar di Tengah Busur
+        // Teks Kecepatan Besar di Paruh Atas Busur (tidak tertutup gambar mobil di bawah)
         speedNumPaint.color = palette.textPrimary
-        speedNumPaint.textSize = (radius * 0.36f).coerceIn(32f, 92f)
-        val speedY = cy - radius * 0.30f
+        speedNumPaint.textSize = (radius * 0.29f).coerceIn(28f, 76f)
+        val speedY = cy - radius * 0.45f
         canvas.drawText(speedKmh.toString(), cx, speedY, speedNumPaint)
 
         // Satuan km/jam
         unitTextPaint.color = palette.textSecondary
-        unitTextPaint.textSize = (radius * 0.095f).coerceIn(12f, 26f)
-        val unitY = speedY + unitTextPaint.textSize * 1.25f
+        unitTextPaint.textSize = (radius * 0.082f).coerceIn(10f, 22f)
+        val unitY = speedY + unitTextPaint.textSize * 1.18f
         canvas.drawText("km/jam", cx, unitY, unitTextPaint)
 
         // Jam Digital (09:29 / 20:09)
         clockTextPaint.color = palette.textPrimary
-        clockTextPaint.textSize = (radius * 0.165f).coerceIn(18f, 44f)
-        val clockY = unitY + clockTextPaint.textSize * 1.22f
+        clockTextPaint.textSize = (radius * 0.145f).coerceIn(15f, 38f)
+        val clockY = unitY + clockTextPaint.textSize * 1.18f
         canvas.drawText(clockText, cx, clockY, clockTextPaint)
 
         // Label GPS SPEED
         subLabelPaint.color = palette.textMuted
-        subLabelPaint.textSize = (radius * 0.062f).coerceIn(9f, 18f)
-        val subY = clockY + subLabelPaint.textSize * 1.45f
+        subLabelPaint.textSize = (radius * 0.056f).coerceIn(8.5f, 15f)
+        val subY = clockY + subLabelPaint.textSize * 1.35f
         canvas.drawText("GPS SPEED", cx, subY, subLabelPaint)
     }
 }

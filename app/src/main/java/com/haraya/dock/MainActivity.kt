@@ -2,6 +2,7 @@ package com.haraya.dock
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
 import android.app.role.RoleManager
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -20,6 +21,8 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.text.Editable
+import android.text.InputFilter
+import android.text.InputType
 import android.text.TextUtils
 import android.text.TextWatcher
 import android.view.Gravity
@@ -31,6 +34,7 @@ import com.haraya.dock.calc.PrayerCalc
 import com.haraya.dock.data.QuoteRepository
 import com.haraya.dock.data.TripAndServiceManager
 import com.haraya.dock.data.WeatherFetcher
+import com.haraya.dock.service.NotificationCollectorService
 import com.haraya.dock.theme.ThemeMode
 import com.haraya.dock.theme.ThemeResolver
 import com.haraya.dock.ui.CarCockpitView
@@ -82,6 +86,7 @@ class MainActivity : Activity(), LocationListener {
     private var currentKmh: Int = 0
     private var lastGeocodedLat: Double = 0.0
     private var lastGeocodedLon: Double = 0.0
+    private var currentStreetLabel: String = "Mencari Jalan..."
 
     // Root & Backdrop
     private lateinit var silkBackground: SilkBackgroundView
@@ -170,6 +175,12 @@ class MainActivity : Activity(), LocationListener {
 
     private val timeTickReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == LocationManager.PROVIDERS_CHANGED_ACTION) {
+                carCockpitView.updateGpsStatus(isGpsProviderActive())
+                if (isGpsProviderActive()) {
+                    startLocationUpdatesIfPermitted()
+                }
+            }
             refreshClockAndSchedule()
         }
     }
@@ -213,8 +224,8 @@ class MainActivity : Activity(), LocationListener {
             onShareLiveLocation = {
                 openGoogleMapsLocationSharing()
             },
-            onRequestLocationPermission = {
-                requestLocationPermissionIfNeeded()
+            onGpsPillClicked = {
+                handleGpsPillClick()
             },
             onOpenMusic = {
                 launchPackageOrMarket(
@@ -242,11 +253,11 @@ class MainActivity : Activity(), LocationListener {
             onOpenObdScreen = {
                 setScreen(AppScreen.OBD)
             },
+            onOpenSettingsDialog = {
+                showCockpitSettingsDialog()
+            },
             onOpenAppsScreen = {
                 setScreen(AppScreen.APPS)
-            },
-            onRequestDefaultLauncher = {
-                requestSetDefaultLauncher()
             }
         )
         carCockpitView.updateWeather(weatherFetcher.getCachedWeather())
@@ -317,6 +328,7 @@ class MainActivity : Activity(), LocationListener {
             addAction(Intent.ACTION_TIME_TICK)
             addAction(Intent.ACTION_TIME_CHANGED)
             addAction(Intent.ACTION_TIMEZONE_CHANGED)
+            addAction(LocationManager.PROVIDERS_CHANGED_ACTION)
         })
         updateLauncherStatus()
         refreshAll()
@@ -1429,7 +1441,7 @@ class MainActivity : Activity(), LocationListener {
         appsAdapter.notifyDataSetChanged()
 
         // 8. Car Cockpit View (Mode Mobil Tengah)
-        carCockpitView.applyTheme(palette, themeMode, isDefaultLauncher())
+        carCockpitView.applyTheme(palette, themeMode, isGpsProviderActive())
 
         refreshClockAndSchedule()
         refreshQuote()
@@ -1444,6 +1456,7 @@ class MainActivity : Activity(), LocationListener {
         clockDateTv.text = dateFmt.format(now)
 
         val prayers = PrayerCalc.calculate(currentLat, currentLon)
+        carCockpitView.updateGpsStatus(isGpsProviderActive())
         carCockpitView.updateClockAndPrayer(clockStr, prayers)
         carCockpitView.refreshTripAndServices()
         val hrs = prayers.nextPrayerRemainingMinutes / 60
@@ -1591,6 +1604,184 @@ class MainActivity : Activity(), LocationListener {
         Toast.makeText(this, "$label belum terpasang di perangkat ini", Toast.LENGTH_SHORT).show()
     }
 
+    private fun isGpsProviderActive(): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+            checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED
+        ) {
+            return false
+        }
+        return runCatching {
+            val lm = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+            lm.isProviderEnabled(LocationManager.GPS_PROVIDER)
+        }.getOrDefault(false)
+    }
+
+    private fun handleGpsPillClick() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+            checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestLocationPermissionIfNeeded()
+            return
+        }
+        if (!isGpsProviderActive()) {
+            runCatching {
+                startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                })
+            }.onFailure {
+                Toast.makeText(this, "Aktifkan Lokasi / GPS melalui panel pengaturan cepat HP", Toast.LENGTH_SHORT).show()
+            }
+        } else {
+            startLocationUpdatesIfPermitted()
+            Toast.makeText(this, "GPS Aktif (${String.format(Locale.US, "%.4f, %.4f", currentLat, currentLon)})", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun showCockpitSettingsDialog() {
+        val themeStyle = if (palette.isDark) {
+            android.R.style.Theme_DeviceDefault_Dialog_Alert
+        } else {
+            android.R.style.Theme_DeviceDefault_Light_Dialog_Alert
+        }
+        val notifOk = NotificationCollectorService.isNotificationAccessGranted(this)
+        val launcherOk = isDefaultLauncher()
+        val gpsOk = isGpsProviderActive()
+
+        val items = arrayOf(
+            "1. Ubah PIN Jadwal Servis (Saat ini: •••• / Default 0000)",
+            "2. Ubah Identitas Mobil (${tripServiceManager.getVehicleName()} • ${tripServiceManager.getVehicleSubtitle()})",
+            "3. Akses Info Judul Lagu Media: ${if (notifOk) "Aktif ✓" else "Belum Aktif (Ketuk untuk Aktifkan)"}",
+            "4. Pengaturan Lokasi & GPS: ${if (gpsOk) "GPS Aktif ✓" else "GPS Nonaktif (Ketuk untuk Nyalakan)"}",
+            "5. Beranda / Launcher Default: ${if (launcherOk) "Sudah Aktif ✓" else "Setel sebagai Launcher Utama"}",
+            "6. Ganti Tata Letak ke Mode Sutra Klasik"
+        )
+
+        AlertDialog.Builder(this, themeStyle)
+            .setTitle("Pengaturan Haraya Dock")
+            .setItems(items) { _, which ->
+                when (which) {
+                    0 -> showChangePinDialog()
+                    1 -> showEditVehicleDialog()
+                    2 -> {
+                        runCatching {
+                            startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).apply {
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                            })
+                        }
+                    }
+                    3 -> {
+                        runCatching {
+                            startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS).apply {
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                            })
+                        }
+                    }
+                    4 -> requestSetDefaultLauncher()
+                    5 -> setHomeStyle(HomeStyle.CLASSIC_SILK)
+                }
+            }
+            .setNegativeButton("Tutup", null)
+            .show()
+    }
+
+    private fun showChangePinDialog() {
+        val themeStyle = if (palette.isDark) {
+            android.R.style.Theme_DeviceDefault_Dialog_Alert
+        } else {
+            android.R.style.Theme_DeviceDefault_Light_Dialog_Alert
+        }
+
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val p = dp(20f)
+            setPadding(p, dp(10f), p, 0)
+        }
+        val oldPinEt = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
+            hint = "Masukkan PIN Lama (Default: 0000)"
+            filters = arrayOf(InputFilter.LengthFilter(8))
+        }
+        val newPinEt = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
+            hint = "Masukkan PIN Baru (4-8 angka)"
+            filters = arrayOf(InputFilter.LengthFilter(8))
+        }
+        col.addView(oldPinEt)
+        col.addView(newPinEt, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            topMargin = dp(8f)
+        })
+
+        AlertDialog.Builder(this, themeStyle)
+            .setTitle("Ubah PIN Jadwal Servis")
+            .setMessage("PIN digunakan saat mengatur atau mereset pengingat servis kendaraan:")
+            .setView(col)
+            .setPositiveButton("Simpan PIN") { _, _ ->
+                val oldPin = oldPinEt.text?.toString().orEmpty()
+                val newPin = newPinEt.text?.toString().orEmpty().trim()
+                if (!tripServiceManager.verifyServicePin(oldPin)) {
+                    Toast.makeText(this, "PIN Lama tidak sesuai!", Toast.LENGTH_LONG).show()
+                } else if (newPin.length < 4) {
+                    Toast.makeText(this, "PIN Baru minimal terdiri dari 4 angka!", Toast.LENGTH_LONG).show()
+                } else {
+                    tripServiceManager.setServicePin(newPin)
+                    Toast.makeText(this, "PIN Jadwal Servis berhasil diperbarui", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNeutralButton("Reset ke 0000") { _, _ ->
+                val oldPin = oldPinEt.text?.toString().orEmpty()
+                if (tripServiceManager.verifyServicePin(oldPin)) {
+                    tripServiceManager.setServicePin("0000")
+                    Toast.makeText(this, "PIN dikembalikan ke 0000", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(this, "Masukkan PIN lama yang benar untuk mereset!", Toast.LENGTH_LONG).show()
+                }
+            }
+            .setNegativeButton("Batal", null)
+            .show()
+    }
+
+    private fun showEditVehicleDialog() {
+        val themeStyle = if (palette.isDark) {
+            android.R.style.Theme_DeviceDefault_Dialog_Alert
+        } else {
+            android.R.style.Theme_DeviceDefault_Light_Dialog_Alert
+        }
+
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val p = dp(20f)
+            setPadding(p, dp(10f), p, 0)
+        }
+        val nameEt = EditText(this).apply {
+            setText(tripServiceManager.getVehicleName())
+            hint = "Nama Mobil (mis. Suzuki Baleno)"
+            setSingleLine(true)
+        }
+        val subEt = EditText(this).apply {
+            setText(tripServiceManager.getVehicleSubtitle())
+            hint = "Tipe & Plat (mis. Hatchback • B 1353 EYX)"
+            setSingleLine(true)
+        }
+        col.addView(nameEt)
+        col.addView(subEt, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            topMargin = dp(8f)
+        })
+
+        AlertDialog.Builder(this, themeStyle)
+            .setTitle("Identitas Kendaraan")
+            .setView(col)
+            .setPositiveButton("Simpan") { _, _ ->
+                tripServiceManager.setVehicleIdentity(
+                    nameEt.text?.toString().orEmpty(),
+                    subEt.text?.toString().orEmpty()
+                )
+                carCockpitView.refreshVehicleIdentity()
+                Toast.makeText(this, "Identitas kendaraan diperbarui", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Batal", null)
+            .show()
+    }
+
     private fun requestLocationPermissionIfNeeded() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             val fineGranted = checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
@@ -1674,7 +1865,8 @@ class MainActivity : Activity(), LocationListener {
         val providerLabel = if (location.provider == LocationManager.GPS_PROVIDER) "GPS Akurat" else "Jaringan"
         val coordSub = String.format(Locale.US, "%.4f, %.4f • %s", currentLat, currentLon, providerLabel)
         locSubTv.text = coordSub
-        carCockpitView.updateLocationInfo(locTitleTv.text.toString(), coordSub)
+        mapCanvas.updateLocation(currentLat, currentLon, currentStreetLabel)
+        carCockpitView.updateLocationInfo(currentLat, currentLon, locTitleTv.text.toString(), currentStreetLabel, coordSub)
 
         weatherFetcher.fetchIfNeeded(currentLat, currentLon) { weather ->
             runOnUiThread {
@@ -1687,7 +1879,7 @@ class MainActivity : Activity(), LocationListener {
     }
 
     private fun reverseGeocodeAsync(lat: Double, lon: Double) {
-        if (kotlin.math.abs(lat - lastGeocodedLat) < 0.005 && kotlin.math.abs(lon - lastGeocodedLon) < 0.005) {
+        if (kotlin.math.abs(lat - lastGeocodedLat) < 0.0008 && kotlin.math.abs(lon - lastGeocodedLon) < 0.0008) {
             return
         }
         lastGeocodedLat = lat
@@ -1704,9 +1896,19 @@ class MainActivity : Activity(), LocationListener {
                         val city = addr.subAdminArea ?: addr.locality ?: addr.adminArea ?: "Lokasi Terdeteksi"
                         val district = addr.locality ?: addr.subLocality ?: ""
                         val title = if (district.isNotEmpty() && district != city) "$district, $city" else city
+
+                        val road = addr.thoroughfare ?: addr.subLocality ?: addr.featureName ?: ""
+                        val streetSummary = when {
+                            road.isNotBlank() && district.isNotBlank() && road != district -> "$road • $district"
+                            road.isNotBlank() -> "$road • $city"
+                            else -> title
+                        }
+
                         runOnUiThread {
+                            currentStreetLabel = streetSummary
                             locTitleTv.text = title
-                            carCockpitView.updateLocationInfo(title, locSubTv.text.toString())
+                            mapCanvas.updateLocation(lat, lon, currentStreetLabel)
+                            carCockpitView.updateLocationInfo(lat, lon, title, currentStreetLabel, locSubTv.text.toString())
                         }
                     }
                 }
@@ -1717,8 +1919,12 @@ class MainActivity : Activity(), LocationListener {
 
     @Deprecated("Deprecated in Java")
     override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
-    override fun onProviderEnabled(provider: String) {}
-    override fun onProviderDisabled(provider: String) {}
+    override fun onProviderEnabled(provider: String) {
+        carCockpitView.updateGpsStatus(isGpsProviderActive())
+    }
+    override fun onProviderDisabled(provider: String) {
+        carCockpitView.updateGpsStatus(isGpsProviderActive())
+    }
 
     private fun dp(value: Float): Int = GlassTheme.dp(this, value)
 

@@ -87,3 +87,4 @@ class WeatherFetcher(context: Context) {
         else -> "Berawan"
     }
 }
+

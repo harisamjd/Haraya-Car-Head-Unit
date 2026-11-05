@@ -218,4 +218,33 @@ class TripAndServiceManager(context: Context) {
     fun updateServiceValue(id: String, newValue: Int) {
         prefs.edit().putInt(id, newValue.coerceAtLeast(0)).apply()
     }
+
+    fun getServicePin(): String {
+        return prefs.getString("service_pin", "0000") ?: "0000"
+    }
+
+    fun verifyServicePin(input: String): Boolean {
+        return input.trim() == getServicePin()
+    }
+
+    fun setServicePin(newPin: String) {
+        val clean = newPin.trim().ifEmpty { "0000" }
+        prefs.edit().putString("service_pin", clean).apply()
+    }
+
+    fun getVehicleName(): String {
+        return prefs.getString("vehicle_name", "Suzuki Baleno") ?: "Suzuki Baleno"
+    }
+
+    fun getVehicleSubtitle(): String {
+        return prefs.getString("vehicle_sub", "Hatchback • B 1353 EYX") ?: "Hatchback • B 1353 EYX"
+    }
+
+    fun setVehicleIdentity(name: String, subtitle: String) {
+        prefs.edit()
+            .putString("vehicle_name", name.trim().ifEmpty { "Suzuki Baleno" })
+            .putString("vehicle_sub", subtitle.trim().ifEmpty { "Hatchback • B 1353 EYX" })
+            .apply()
+    }
 }
+
