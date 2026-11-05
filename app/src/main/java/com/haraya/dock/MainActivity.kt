@@ -371,6 +371,9 @@ class MainActivity : Activity(), LocationListener {
         }
         refreshAll()
         applyObdTelemetryToUi(obdConnectionManager.getCurrentTelemetry())
+        carCockpitView.post {
+            carCockpitView.playOpeningIntroAnimation()
+        }
         requestLocationPermissionIfNeeded()
         loadInstalledAppsAsync()
         weatherFetcher.fetchIfNeeded(currentLat, currentLon) { weather ->
@@ -390,7 +393,7 @@ class MainActivity : Activity(), LocationListener {
         val target = intent?.getStringExtra(EXTRA_TARGET_SCREEN) ?: return
         when (target) {
             EXTRA_TARGET_HOME -> setScreen(AppScreen.HOME)
-            EXTRA_TARGET_MAP -> setScreen(AppScreen.MAP)
+            EXTRA_TARGET_MAP -> launchPackageOrMarket(listOf("com.google.android.apps.maps", "com.waze"), "Google Maps")
             EXTRA_TARGET_OBD -> setScreen(AppScreen.OBD)
             EXTRA_TARGET_APPS -> setScreen(AppScreen.APPS)
         }
@@ -1766,14 +1769,16 @@ class MainActivity : Activity(), LocationListener {
     }
 
     private fun openPhoneDialer() {
-        try {
-            val intent = Intent(Intent.ACTION_DIAL).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        val whatsappPackages = listOf("com.whatsapp", "com.whatsapp.w4b")
+        for (pkg in whatsappPackages) {
+            val launchIntent = packageManager.getLaunchIntentForPackage(pkg)
+            if (launchIntent != null) {
+                launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(launchIntent)
+                return
             }
-            startActivity(intent)
-        } catch (_: Exception) {
-            Toast.makeText(this, "Phone dialer app not found on this device", Toast.LENGTH_SHORT).show()
         }
+        Toast.makeText(this, "WhatsApp is not installed on this device", Toast.LENGTH_SHORT).show()
     }
 
     private fun launchPackageOrMarket(candidates: List<String>, label: String) {

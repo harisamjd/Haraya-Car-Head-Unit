@@ -83,13 +83,16 @@ class CarCockpitView(
     private var embeddedObdView: View? = null
     private var embeddedAppsView: View? = null
 
-    // Top Bar
-    private val topBarLayout: LinearLayout
+    // Main columns & corner controls (between Maps & Speedo on left, and Speedo & Trip History on right)
+    private val leftCol: LinearLayout
+    private val centerCol: LinearLayout
+    private val rightCol: LinearLayout
+    private val centerStageFrame: FrameLayout
+    private val leftCornerControls: LinearLayout
+    private val rightCornerControls: LinearLayout
     private val themeCycleBtn: FrameLayout
     private val themeCycleIcon: VectorIconView
     private val layoutSwitchBtn: TextView
-    private val topBrandTitleTv: TextView
-    private val topBrandSubTv: TextView
     private val gpsPillTv: TextView
     private val settingsTopBtn: FrameLayout
     private val settingsTopIcon: VectorIconView
@@ -124,8 +127,13 @@ class CarCockpitView(
 
     private val speedArcView: CenterSpeedArcView
     private val carImageView: ImageView
+    private val carBottomStatusBar: LinearLayout
     private val carNameTv: TextView
     private val carSubTv: TextView
+    private val centerClockTv: TextView
+    private val gearBox: LinearLayout
+    private val gearMetaTv: TextView
+    private val gearBadgeTv: TextView
 
     private val mediaCard: GlassCardView
     private val mediaTitleTv: TextView
@@ -178,20 +186,16 @@ class CarCockpitView(
         orientation = VERTICAL
         val pad = dp(12f)
         setPadding(pad, dp(7f), pad, dp(7f))
+        clipChildren = false
+        clipToPadding = false
 
         NotificationCollectorService.onMediaChangedCallback = {
             post { refreshMediaState() }
         }
 
         // ==========================================
-        // 1. TOP STATUS & MODE BAR
+        // 1. FLOATING CORNER CONTROLS (Between Maps & Speedo / Speedo & Trip History)
         // ==========================================
-        topBarLayout = LinearLayout(context).apply {
-            orientation = HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-
-        // Single Theme Mode Cycle Button: Sun (Light) -> Moon (Dark) -> A (Auto)
         themeCycleIcon = VectorIconView(context, VectorIconView.IconType.AUTO_A)
         themeCycleBtn = FrameLayout(context).apply {
             addView(themeCycleIcon, FrameLayout.LayoutParams(dp(15f), dp(15f), Gravity.CENTER))
@@ -214,83 +218,58 @@ class CarCockpitView(
             setOnClickListener { onSwitchToClassicLayout() }
         }
 
-        val leftTopGroup = LinearLayout(context).apply {
+        leftCornerControls = LinearLayout(context).apply {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        leftTopGroup.addView(themeCycleBtn, LayoutParams(dp(30f), dp(26f)))
-        leftTopGroup.addView(layoutSwitchBtn, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-            leftMargin = dp(6f)
+        leftCornerControls.addView(themeCycleBtn, LayoutParams(dp(30f), dp(26f)))
+        leftCornerControls.addView(layoutSwitchBtn, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            leftMargin = dp(5f)
         })
 
-        val brandCenterCol = LinearLayout(context).apply {
-            orientation = VERTICAL
-            gravity = Gravity.CENTER
-        }
-        topBrandTitleTv = TextView(context).apply {
-            text = "HARAYA DOCK"
-            textSize = 12f
-            typeface = Typeface.create("sans-serif", Typeface.BOLD)
-            letterSpacing = 0.16f
-            includeFontPadding = false
-            gravity = Gravity.CENTER
-        }
-        topBrandSubTv = TextView(context).apply {
-            text = "Vehicle Smart Cockpit"
-            textSize = 8.5f
-            includeFontPadding = false
-            gravity = Gravity.CENTER
-        }
-        brandCenterCol.addView(topBrandTitleTv)
-        brandCenterCol.addView(topBrandSubTv)
-
-        val rightTopGroup = LinearLayout(context).apply {
-            orientation = HORIZONTAL
-            gravity = Gravity.END or Gravity.CENTER_VERTICAL
-        }
         gpsPillTv = TextView(context).apply {
             text = "● GPS Active"
-            textSize = 10f
+            textSize = 9.5f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
             includeFontPadding = false
-            setPadding(dp(10f), dp(5f), dp(10f), dp(5f))
+            setPadding(dp(9f), dp(5f), dp(9f), dp(5f))
             setOnClickListener { onGpsPillClicked() }
         }
 
-        // Settings Icon-Only Button
         settingsTopIcon = VectorIconView(context, VectorIconView.IconType.GEAR_COG)
         settingsTopBtn = FrameLayout(context).apply {
             addView(settingsTopIcon, FrameLayout.LayoutParams(dp(15f), dp(15f), Gravity.CENTER))
             setOnClickListener { onOpenSettingsDialog() }
         }
 
-        rightTopGroup.addView(gpsPillTv)
-        rightTopGroup.addView(settingsTopBtn, LayoutParams(dp(30f), dp(26f)).apply {
-            leftMargin = dp(6f)
-        })
-
-        topBarLayout.addView(leftTopGroup, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.15f))
-        topBarLayout.addView(brandCenterCol, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.7f))
-        topBarLayout.addView(rightTopGroup, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.15f))
-
-        addView(topBarLayout, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-            bottomMargin = dp(5f)
+        rightCornerControls = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.END or Gravity.CENTER_VERTICAL
+        }
+        rightCornerControls.addView(gpsPillTv)
+        rightCornerControls.addView(settingsTopBtn, LayoutParams(dp(30f), dp(26f)).apply {
+            leftMargin = dp(5f)
         })
 
         // ==========================================
         // 2. MAIN 3-COLUMN COCKPIT AREA & EMBEDDED STAGE HOST
         // ==========================================
-        stageHostFrame = FrameLayout(context)
+        stageHostFrame = FrameLayout(context).apply {
+            clipChildren = false
+            clipToPadding = false
+        }
 
         mainColumnsRow = LinearLayout(context).apply {
             orientation = HORIZONTAL
+            clipChildren = false
+            clipToPadding = false
         }
 
         val cardPadH = dp(12f)
         val cardPadV = dp(8f)
 
         // --- LEFT COLUMN: (1) Live Map + (2) Prayer Times + (3) Daily Verse & Prayer ---
-        val leftCol = LinearLayout(context).apply {
+        leftCol = LinearLayout(context).apply {
             orientation = VERTICAL
         }
 
@@ -495,10 +474,12 @@ class CarCockpitView(
             rightMargin = dp(8f)
         })
 
-        // --- CENTER COLUMN (Alert Banner + Speedometer Arc with Mini RPM/Gear + Vehicle Image + Media Control) ---
-        val centerCol = LinearLayout(context).apply {
+        // --- CENTER COLUMN (Alert Banner + Dual Speedo/RPM Arc + Raised Car + [Identity - Clock - Gear] + Media) ---
+        centerCol = LinearLayout(context).apply {
             orientation = VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
+            clipChildren = false
+            clipToPadding = false
         }
 
         alertBannerBox = LinearLayout(context).apply {
@@ -509,13 +490,13 @@ class CarCockpitView(
         }
         val alertTextCol = LinearLayout(context).apply { orientation = VERTICAL }
         alertBannerTitleTv = TextView(context).apply {
-            text = "Fasten Your Seatbelt"
+            text = "Service Maintenance Due!"
             textSize = 9.5f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
             includeFontPadding = false
         }
         alertBannerSubTv = TextView(context).apply {
-            text = "Please fasten your seatbelt for a safe journey"
+            text = ""
             textSize = 8.5f
             includeFontPadding = false
             maxLines = 1
@@ -541,8 +522,17 @@ class CarCockpitView(
             bottomMargin = dp(4f)
         })
 
-        // Center Instrument Stage: Speedometer Arc + Mini RPM/Gear at top, Vehicle Image at bottom
-        val centerStageFrame = FrameLayout(context)
+        // Center Instrument Stage:
+        // - Top-Left Corner: [Theme] [Classic] (between Maps & Speedo)
+        // - Top-Right Corner: [GPS Active] [Settings] (between Speedo & Trip History)
+        // - Center Arch: Dual Speedo & RPM Arcs
+        // - Raised Inside Arch: Vehicle Illustration
+        // - Bottom Row Below Car: Vehicle Identity (Left) - Digital Clock (Center) - Gear Position (Right)
+        centerStageFrame = FrameLayout(context).apply {
+            clipChildren = false
+            clipToPadding = false
+        }
+
         speedArcView = CenterSpeedArcView(context).apply {
             setOnClickListener { onOpenObdSettingsModal() }
         }
@@ -551,6 +541,17 @@ class CarCockpitView(
             FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.TOP)
         )
 
+        // Corner buttons tucked neatly into the upper corners outside the speedometer curve
+        centerStageFrame.addView(
+            leftCornerControls,
+            FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START)
+        )
+        centerStageFrame.addView(
+            rightCornerControls,
+            FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END)
+        )
+
+        // Raised Car Illustration inside the Inner RPM Arc
         carImageView = ImageView(context).apply {
             setImageResource(R.drawable.car_baleno)
             scaleType = ImageView.ScaleType.FIT_CENTER
@@ -558,33 +559,88 @@ class CarCockpitView(
         }
         centerStageFrame.addView(
             carImageView,
-            FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(100f), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
-                leftMargin = dp(28f)
-                rightMargin = dp(28f)
-                bottomMargin = dp(2f)
+            FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(116f), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
+                leftMargin = dp(34f)
+                rightMargin = dp(34f)
+                bottomMargin = dp(40f)
             }
         )
 
+        // Bottom Bar Below Car: [ Vehicle Identity (Left) — Digital Clock (Center) — Gear Position (Right) ]
+        carBottomStatusBar = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(4f), 0, dp(4f), 0)
+        }
+
+        // 1. Left: Vehicle Identity
         val carBadgeCol = LinearLayout(context).apply {
             orientation = VERTICAL
+            gravity = Gravity.START or Gravity.CENTER_VERTICAL
         }
         carNameTv = TextView(context).apply {
             text = tripServiceManager.getVehicleName()
-            textSize = 12f
+            textSize = 11.5f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
             includeFontPadding = false
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
         }
         carSubTv = TextView(context).apply {
             text = tripServiceManager.getVehicleSubtitle()
             textSize = 8.5f
             includeFontPadding = false
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
         }
         carBadgeCol.addView(carNameTv)
         carBadgeCol.addView(carSubTv)
+
+        // 2. Center: Digital Clock
+        centerClockTv = TextView(context).apply {
+            text = "09:29"
+            textSize = 23f
+            typeface = Typeface.create("sans-serif", Typeface.BOLD)
+            fontFeatureSettings = "tnum"
+            includeFontPadding = false
+            gravity = Gravity.CENTER
+        }
+
+        // 3. Right: Gear Position Indicator
+        gearBox = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.END or Gravity.CENTER_VERTICAL
+            setOnClickListener { onOpenObdSettingsModal() }
+        }
+        gearMetaTv = TextView(context).apply {
+            text = "GEAR\nGPS"
+            textSize = 7.5f
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+            letterSpacing = 0.06f
+            includeFontPadding = false
+            gravity = Gravity.END
+        }
+        gearBadgeTv = TextView(context).apply {
+            text = "P"
+            textSize = 15f
+            typeface = Typeface.create("sans-serif", Typeface.BOLD)
+            includeFontPadding = false
+            gravity = Gravity.CENTER
+            minWidth = dp(40f)
+            setPadding(dp(10f), dp(4f), dp(10f), dp(4f))
+        }
+        gearBox.addView(gearMetaTv, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            rightMargin = dp(6f)
+        })
+        gearBox.addView(gearBadgeTv)
+
+        carBottomStatusBar.addView(carBadgeCol, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.15f))
+        carBottomStatusBar.addView(centerClockTv, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.90f))
+        carBottomStatusBar.addView(gearBox, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.15f))
+
         centerStageFrame.addView(
-            carBadgeCol,
-            FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.START).apply {
-                leftMargin = dp(6f)
+            carBottomStatusBar,
+            FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM).apply {
                 bottomMargin = dp(2f)
             }
         )
@@ -606,7 +662,7 @@ class CarCockpitView(
                 if (!NotificationCollectorService.isNotificationAccessGranted(context)) {
                     promptNotificationListenerAccess()
                 } else {
-                    onOpenMusic()
+                    showMediaChooserDialog()
                 }
             }
         }
@@ -672,7 +728,7 @@ class CarCockpitView(
         })
 
         // --- RIGHT COLUMN: (1) Trip History + (2) Service Schedule (PIN Locked) + (3) Weather ---
-        val rightCol = LinearLayout(context).apply {
+        rightCol = LinearLayout(context).apply {
             orientation = VERTICAL
         }
 
@@ -1072,8 +1128,8 @@ class CarCockpitView(
 
         val dockSpecs = listOf(
             Triple(VectorIconView.IconType.HOME, "HOME") { onSelectHomeStage() },
-            Triple(VectorIconView.IconType.MAPS, "MAP") { onSelectMapStage() },
-            Triple(VectorIconView.IconType.MUSIC, "MEDIA") { onOpenMusic() },
+            Triple(VectorIconView.IconType.MAPS, "MAP") { onOpenExternalMaps() },
+            Triple(VectorIconView.IconType.MUSIC, "MEDIA") { showMediaChooserDialog() },
             Triple(VectorIconView.IconType.PHONE, "PHONE") { onOpenPhone() },
             Triple(VectorIconView.IconType.GAUGE, "OBD & ENGINE") { onOpenObdScreen() },
             Triple(VectorIconView.IconType.APPS_GRID, "APPS") { onOpenAppsScreen() }
@@ -1129,10 +1185,11 @@ class CarCockpitView(
     fun updateObdTelemetry(telemetry: ObdConnectionManager.ObdTelemetry) {
         speedArcView.setObdTelemetry(
             speed = telemetry.speedKmh,
-            rpm = telemetry.rpm,
-            gear = telemetry.gearLabel,
-            src = telemetry.sourceLabel
+            rpm = telemetry.rpm
         )
+        gearBadgeTv.text = telemetry.gearLabel
+        val shortSrc = if (telemetry.sourceLabel.contains("OBD")) "OBD-II" else "GPS"
+        gearMetaTv.text = "GEAR\n$shortSrc"
     }
 
     fun updateGpsStatus(enabled: Boolean) {
@@ -1159,7 +1216,7 @@ class CarCockpitView(
     }
 
     fun updateClockAndPrayer(clockStr: String, prayers: PrayerCalc.PrayerTimes) {
-        speedArcView.setClockText(clockStr)
+        centerClockTv.text = clockStr
 
         if (adhanPlayerManager.isPlayingAdhan) {
             prayerNextTv.text = "🔊 Stop Adhan"
@@ -1388,8 +1445,159 @@ class CarCockpitView(
     }
 
     // ========================================================
-    // CUSTOM THEMED POPUPS (English UI)
+    // OPENING INTRO ANIMATION & CUSTOM THEMED POPUPS
     // ========================================================
+
+    /**
+     * Cinematic Opening Animation:
+     * 1. Starts with a blank background and the Vehicle Illustration zoomed in large across the screen.
+     * 2. The car smoothly zooms out into its raised center cockpit stage.
+     * 3. The Dual Speedo/RPM Arcs (with a full-scale thick block sweep), Bottom Status Bar,
+     *    Left & Right Cards, and Bottom Dock emerge around the car.
+     */
+    fun playOpeningIntroAnimation() {
+        val sideViews = listOf(leftCol, rightCol, bottomDockCard, mediaCard, carBottomStatusBar, leftCornerControls, rightCornerControls)
+        for (v in sideViews) {
+            v.animate().cancel()
+            v.alpha = 0f
+        }
+        leftCol.translationX = -dp(28f).toFloat()
+        rightCol.translationX = dp(28f).toFloat()
+        bottomDockCard.translationY = dp(22f).toFloat()
+        mediaCard.translationY = dp(16f).toFloat()
+        carBottomStatusBar.translationY = dp(12f).toFloat()
+
+        speedArcView.animate().cancel()
+        speedArcView.alpha = 0f
+        speedArcView.scaleX = 0.86f
+        speedArcView.scaleY = 0.86f
+
+        carImageView.animate().cancel()
+        carImageView.translationZ = dp(24f).toFloat()
+        carImageView.alpha = 0f
+        carImageView.scaleX = 2.85f
+        carImageView.scaleY = 2.85f
+        carImageView.translationY = -dp(20f).toFloat()
+
+        // Step 1 & 2: Car appears large on blank background, then zooms out into position
+        carImageView.animate()
+            .alpha(1f)
+            .setDuration(260L)
+            .withEndAction {
+                carImageView.animate()
+                    .scaleX(1f)
+                    .scaleY(1f)
+                    .translationY(0f)
+                    .setDuration(820L)
+                    .setInterpolator(android.view.animation.DecelerateInterpolator(1.8f))
+                    .withEndAction {
+                        carImageView.translationZ = 0f
+                    }
+                    .start()
+            }
+            .start()
+
+        // Step 3: Instruments & Cards emerge as the car settles, plus thick gauge block sweep
+        postDelayed({
+            speedArcView.animate()
+                .alpha(1f)
+                .scaleX(1f)
+                .scaleY(1f)
+                .setDuration(480L)
+                .setInterpolator(android.view.animation.DecelerateInterpolator())
+                .start()
+            speedArcView.playGaugeSweepIntro()
+
+            carBottomStatusBar.animate()
+                .alpha(1f)
+                .translationY(0f)
+                .setDuration(460L)
+                .start()
+
+            mediaCard.animate()
+                .alpha(1f)
+                .translationY(0f)
+                .setStartDelay(70L)
+                .setDuration(460L)
+                .start()
+
+            leftCol.animate()
+                .alpha(1f)
+                .translationX(0f)
+                .setStartDelay(110L)
+                .setDuration(500L)
+                .setInterpolator(android.view.animation.DecelerateInterpolator())
+                .start()
+
+            rightCol.animate()
+                .alpha(1f)
+                .translationX(0f)
+                .setStartDelay(110L)
+                .setDuration(500L)
+                .setInterpolator(android.view.animation.DecelerateInterpolator())
+                .start()
+
+            leftCornerControls.animate()
+                .alpha(1f)
+                .setStartDelay(180L)
+                .setDuration(420L)
+                .start()
+
+            rightCornerControls.animate()
+                .alpha(1f)
+                .setStartDelay(180L)
+                .setDuration(420L)
+                .start()
+
+            bottomDockCard.animate()
+                .alpha(1f)
+                .translationY(0f)
+                .setStartDelay(160L)
+                .setDuration(480L)
+                .setInterpolator(android.view.animation.DecelerateInterpolator())
+                .start()
+        }, 720L)
+    }
+
+    private fun showMediaChooserDialog() {
+        HarayaDialog.showCustomModal(
+            context = context,
+            palette = palette,
+            title = "Open Media Player",
+            subtitle = "Choose your preferred music or video streaming application",
+            contentBuilder = { container, dlg ->
+                val ytMusicRow = HarayaDialog.buildOptionRow(
+                    context = context,
+                    palette = palette,
+                    title = "YouTube Music",
+                    subtitle = "Stream music playlists, albums, and background audio",
+                    badgeText = "Open Music",
+                    badgePositive = true
+                ) {
+                    dlg.dismiss()
+                    onOpenMusic()
+                }
+                val ytVideoRow = HarayaDialog.buildOptionRow(
+                    context = context,
+                    palette = palette,
+                    title = "YouTube",
+                    subtitle = "Watch videos, livestreams, and podcasts",
+                    badgeText = "Open Video",
+                    badgePositive = false
+                ) {
+                    dlg.dismiss()
+                    onOpenYouTube()
+                }
+                container.addView(ytMusicRow, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                    bottomMargin = dp(6f)
+                })
+                container.addView(ytVideoRow, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            },
+            actions = listOf(
+                HarayaDialog.ActionButton("Cancel", isPrimary = false) { it.dismiss() }
+            )
+        )
+    }
 
     private fun showAdhanPreviewDialog() {
         HarayaDialog.showCustomModal(
@@ -1734,9 +1942,6 @@ class CarCockpitView(
         layoutSwitchBtn.setTextColor(palette.textPrimary)
         GlassTheme.makePressable(context, layoutSwitchBtn, palette, 8f)
 
-        topBrandTitleTv.setTextColor(palette.textPrimary)
-        topBrandSubTv.setTextColor(palette.textMuted)
-
         styleGpsPill()
 
         settingsTopBtn.background = GlassTheme.innerDrawable(context, palette, 8f)
@@ -1764,6 +1969,11 @@ class CarCockpitView(
         refreshVehicleIdentity()
         carNameTv.setTextColor(palette.textPrimary)
         carSubTv.setTextColor(palette.textSecondary)
+        centerClockTv.setTextColor(palette.textPrimary)
+        gearMetaTv.setTextColor(palette.textMuted)
+        gearBadgeTv.background = GlassTheme.selectDrawable(context, palette, 8f)
+        gearBadgeTv.setTextColor(palette.selectFg)
+        GlassTheme.makePressable(context, gearBox, palette, 8f)
 
         mediaCard.applyTheme(palette)
         mediaTitleTv.setTextColor(palette.textPrimary)

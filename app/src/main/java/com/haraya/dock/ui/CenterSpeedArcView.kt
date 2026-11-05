@@ -1,8 +1,11 @@
 package com.haraya.dock.ui
 
+import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.*
 import android.view.View
+import android.view.animation.AccelerateDecelerateInterpolator
+import android.view.animation.DecelerateInterpolator
 import com.haraya.dock.ui.glass.GlassPalette
 import com.haraya.dock.ui.glass.GlassTheme
 import kotlin.math.cos
@@ -11,18 +14,20 @@ import kotlin.math.sin
 
 /**
  * Dual Concentric Instrument Cluster:
- * 1. Outer Visual Speedometer Arc (0..200 km/h) with scale ticks, numbers, color zones, and active pointer dot.
- * 2. Inner Visual RPM Tachometer Arc (0..8 x1000 r/min) below/inside the speedo arc with scale ticks (0..8),
- *    color zones, and active pointer dot.
- * 3. Center Hub: Prominent Gear Position indicator (replacing numeric km/h) + Large Digital Clock.
+ * 1. Outer Visual Speedometer Arc (0..200 km/h) with thick block sweep fill, scale ticks, and leading block bar.
+ * 2. Inner Visual RPM Tachometer Arc (0..8 x1000 r/min) below/inside the speedo arc with thick block sweep fill.
+ * The center space inside the inner RPM arc frames the raised Vehicle Illustration.
  */
 class CenterSpeedArcView(context: Context) : View(context) {
 
-    private var speedKmh: Int = 0
-    private var rpmValue: Int = 0
-    private var gearText: String = "P"
-    private var sourceLabel: String = "GPS SPEED"
-    private var clockText: String = "09:29"
+    private var targetSpeedKmh: Int = 0
+    private var targetRpmValue: Int = 0
+
+    private var animSpeed: Float = 0f
+    private var animRpm: Float = 0f
+    private var valueAnimator: ValueAnimator? = null
+    private var isIntroSweeping: Boolean = false
+
     private var palette: GlassPalette = GlassTheme.Dark
 
     private val bgArcPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -30,9 +35,14 @@ class CenterSpeedArcView(context: Context) : View(context) {
         strokeCap = Paint.Cap.BUTT
     }
 
-    private val activeArcPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val thickBlockPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeCap = Paint.Cap.ROUND
+        strokeCap = Paint.Cap.BUTT
+    }
+
+    private val activeRimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.BUTT
     }
 
     private val tickPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -50,67 +60,86 @@ class CenterSpeedArcView(context: Context) : View(context) {
         textAlign = Paint.Align.CENTER
     }
 
+    private val needleBarPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+    }
+
     private val pointerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
     }
 
-    private val pointerStrokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-    }
-
-    private val gearBadgeFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.FILL
-    }
-
-    private val gearBadgeStrokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-    }
-
-    private val gearTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        typeface = Typeface.create("sans-serif", Typeface.BOLD)
-        textAlign = Paint.Align.CENTER
-    }
-
-    private val clockTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        typeface = Typeface.create("sans-serif", Typeface.BOLD)
-        textAlign = Paint.Align.CENTER
-        fontFeatureSettings = "tnum"
-    }
-
-    private val metaLabelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-        textAlign = Paint.Align.CENTER
-        letterSpacing = 0.08f
-    }
-
     private val outerArcRect = RectF()
+    private val outerBlockRect = RectF()
     private val innerArcRect = RectF()
-    private val gearPillRect = RectF()
+    private val innerBlockRect = RectF()
 
     fun setSpeed(kmh: Int) {
         val clamped = kmh.coerceIn(0, 200)
-        if (speedKmh != clamped) {
-            speedKmh = clamped
-            invalidate()
+        if (targetSpeedKmh != clamped) {
+            targetSpeedKmh = clamped
+            animateToTargets()
         }
     }
 
-    fun setObdTelemetry(speed: Int, rpm: Int, gear: String, src: String) {
+    fun setObdTelemetry(speed: Int, rpm: Int) {
         val clampedSpd = speed.coerceIn(0, 200)
         val clampedRpm = rpm.coerceIn(0, 8000)
-        if (speedKmh != clampedSpd || rpmValue != clampedRpm || gearText != gear || sourceLabel != src) {
-            speedKmh = clampedSpd
-            rpmValue = clampedRpm
-            gearText = gear
-            sourceLabel = src
-            invalidate()
+        if (targetSpeedKmh != clampedSpd || targetRpmValue != clampedRpm) {
+            targetSpeedKmh = clampedSpd
+            targetRpmValue = clampedRpm
+            animateToTargets()
         }
     }
 
-    fun setClockText(time: String) {
-        if (clockText != time) {
-            clockText = time
-            invalidate()
+    private fun animateToTargets() {
+        if (isIntroSweeping) return
+        val startSpd = animSpeed
+        val startRpm = animRpm
+        val endSpd = targetSpeedKmh.toFloat()
+        val endRpm = targetRpmValue.toFloat()
+
+        valueAnimator?.cancel()
+        valueAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 280L
+            interpolator = DecelerateInterpolator()
+            addUpdateListener { va ->
+                val f = va.animatedValue as Float
+                animSpeed = startSpd + (endSpd - startSpd) * f
+                animRpm = startRpm + (endRpm - startRpm) * f
+                invalidate()
+            }
+            start()
+        }
+    }
+
+    /**
+     * Plays a dramatic gauge check sweep (0 -> full scale -> live reading) when the cockpit opens
+     * so the thick block visualization is showcased immediately on startup.
+     */
+    fun playGaugeSweepIntro() {
+        isIntroSweeping = true
+        valueAnimator?.cancel()
+        valueAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 1150L
+            interpolator = AccelerateDecelerateInterpolator()
+            addUpdateListener { va ->
+                val t = va.animatedValue as Float
+                if (t <= 0.5f) {
+                    val up = t / 0.5f
+                    animSpeed = 200f * up
+                    animRpm = 8000f * up
+                } else {
+                    val down = (t - 0.5f) / 0.5f
+                    animSpeed = 200f + (targetSpeedKmh - 200f) * down
+                    animRpm = 8000f + (targetRpmValue - 8000f) * down
+                }
+                invalidate()
+                if (t >= 1f) {
+                    isIntroSweeping = false
+                }
+            }
+            start()
         }
     }
 
@@ -128,20 +157,20 @@ class CenterSpeedArcView(context: Context) : View(context) {
         val startAngle = 170f
         val totalSweep = 200f
 
-        val radius = min(w * 0.45f, h * 0.85f)
-        val speedStrokeW = (radius * 0.072f).coerceIn(7f, 16f)
+        val radius = min(w * 0.43f, h * 0.79f)
+        val speedStrokeW = (radius * 0.068f).coerceIn(6.5f, 15f)
         val cx = w / 2f
-        val cy = radius + speedStrokeW * 0.85f
+        val cy = radius + speedStrokeW * 1.85f
+
+        val zone1Color = if (palette.isDark) 0x382DD4BF else 0x4838BDF8
+        val zone2Color = if (palette.isDark) 0x38F59E0B else 0x48FBBF24
+        val zone3Color = if (palette.isDark) 0x38EF4444 else 0x48F87171
 
         // ==========================================================
-        // 1. OUTER ARC: SPEEDOMETER (0 .. 200 km/h)
+        // 1. OUTER ARC: SPEEDOMETER (0 .. 200 km/h) WITH THICK BLOCKING
         // ==========================================================
         outerArcRect.set(cx - radius, cy - radius, cx + radius, cy + radius)
         bgArcPaint.strokeWidth = speedStrokeW
-
-        val zone1Color = if (palette.isDark) 0x442DD4BF else 0x5538BDF8
-        val zone2Color = if (palette.isDark) 0x44F59E0B else 0x55FBBF24
-        val zone3Color = if (palette.isDark) 0x44EF4444 else 0x55F87171
 
         val speedSweep1 = totalSweep * (80f / 200f)
         val speedSweep2 = totalSweep * (40f / 200f)
@@ -154,34 +183,51 @@ class CenterSpeedArcView(context: Context) : View(context) {
         bgArcPaint.color = zone3Color
         canvas.drawArc(outerArcRect, startAngle + speedSweep1 + speedSweep2, speedSweep3, false, bgArcPaint)
 
-        // Active Speed Arc + Pointer Dot
+        val speedTickOuter = radius - speedStrokeW * 0.45f
+        val speedTickMajorInner = radius - speedStrokeW * 1.45f
+        val speedTickMinorInner = radius - speedStrokeW * 1.05f
+        val speedTextRadius = radius - speedStrokeW * 2.15f
+
+        val speedFrac = (animSpeed / 200f).coerceIn(0f, 1f)
         val speedColor = when {
-            speedKmh >= 120 -> 0xFFEF4444.toInt()
-            speedKmh >= 80 -> 0xFFF59E0B.toInt()
+            animSpeed >= 120f -> 0xFFEF4444.toInt()
+            animSpeed >= 80f -> 0xFFF59E0B.toInt()
             else -> if (palette.isDark) 0xFF2DD4BF.toInt() else 0xFF0284C7.toInt()
         }
-        val speedFrac = (speedKmh / 200f).coerceIn(0f, 1f)
-        if (speedKmh > 0) {
-            activeArcPaint.strokeWidth = speedStrokeW
-            activeArcPaint.color = speedColor
-            canvas.drawArc(outerArcRect, startAngle, totalSweep * speedFrac, false, activeArcPaint)
-        }
+        val speedBlockColor = (speedColor and 0x00FFFFFF) or 0x7A000000
+
+        // Thick Block Sweep Band (fills both the outer arc and the tick-mark band)
+        val speedBlockOuterR = radius + speedStrokeW * 0.48f
+        val speedBlockInnerR = speedTickMajorInner
+        val speedBlockW = speedBlockOuterR - speedBlockInnerR
+        val speedBlockMidR = (speedBlockOuterR + speedBlockInnerR) / 2f
+        outerBlockRect.set(cx - speedBlockMidR, cy - speedBlockMidR, cx + speedBlockMidR, cy + speedBlockMidR)
+
+        val activeSpeedSweep = (totalSweep * speedFrac).coerceAtLeast(if (animSpeed > 0.2f) 2.5f else 1.5f)
+        thickBlockPaint.strokeWidth = speedBlockW
+        thickBlockPaint.color = speedBlockColor
+        canvas.drawArc(outerBlockRect, startAngle, activeSpeedSweep, false, thickBlockPaint)
+
+        // Bright Outer Rim of the Thick Block
+        activeRimPaint.strokeWidth = speedStrokeW
+        activeRimPaint.color = speedColor
+        canvas.drawArc(outerArcRect, startAngle, activeSpeedSweep, false, activeRimPaint)
 
         // Speed ticks & numbers (0, 20, 40, ..., 200)
-        val speedTickOuter = radius - speedStrokeW * 0.52f
-        val speedTickMajorInner = radius - speedStrokeW * 1.15f
-        val speedTickMinorInner = radius - speedStrokeW * 0.85f
-        val speedTextRadius = radius - speedStrokeW * 1.85f
-
-        scaleTextPaint.textSize = (radius * 0.062f).coerceIn(9.5f, 18f)
+        scaleTextPaint.textSize = (radius * 0.060f).coerceIn(9.5f, 17f)
         for (spd in 0..200 step 10) {
             val frac = spd / 200f
             val deg = startAngle + frac * totalSweep
             val rad = Math.toRadians(deg.toDouble())
             val isMajor = spd % 20 == 0
+            val isPassed = spd <= animSpeed + 0.5f
 
-            tickPaint.strokeWidth = if (isMajor) (speedStrokeW * 0.19f).coerceAtLeast(1.8f) else (speedStrokeW * 0.11f).coerceAtLeast(1.1f)
-            tickPaint.color = if (spd >= 140) 0xFFEF4444.toInt() else palette.textSecondary
+            tickPaint.strokeWidth = if (isMajor) (speedStrokeW * 0.22f).coerceAtLeast(1.8f) else (speedStrokeW * 0.12f).coerceAtLeast(1.1f)
+            tickPaint.color = when {
+                isPassed -> 0xFFFFFFFF.toInt()
+                spd >= 140 -> 0xFFEF4444.toInt()
+                else -> palette.textSecondary
+            }
 
             val innerR = if (isMajor) speedTickMajorInner else speedTickMinorInner
             canvas.drawLine(
@@ -193,32 +239,37 @@ class CenterSpeedArcView(context: Context) : View(context) {
             )
 
             if (isMajor) {
-                scaleTextPaint.color = if (spd >= 140) 0xFFF87171.toInt() else palette.textSecondary
+                scaleTextPaint.color = when {
+                    isPassed && spd > 0 -> palette.textPrimary
+                    spd >= 140 -> 0xFFF87171.toInt()
+                    else -> palette.textSecondary
+                }
                 val tx = cx + (speedTextRadius * cos(rad)).toFloat()
                 val ty = cy + (speedTextRadius * sin(rad)).toFloat() + scaleTextPaint.textSize * 0.35f
                 canvas.drawText(spd.toString(), tx, ty, scaleTextPaint)
             }
         }
 
-        // Speed Pointer Dot on Outer Arc
-        val speedAngleRad = Math.toRadians((startAngle + speedFrac * totalSweep).toDouble())
-        val speedDotX = cx + (radius * cos(speedAngleRad)).toFloat()
-        val speedDotY = cy + (radius * sin(speedAngleRad)).toFloat()
-        pointerPaint.color = speedColor
-        canvas.drawCircle(speedDotX, speedDotY, speedStrokeW * 0.68f, pointerPaint)
-        pointerStrokePaint.color = 0xFFFFFFFF.toInt()
-        pointerStrokePaint.strokeWidth = (speedStrokeW * 0.18f).coerceAtLeast(1.5f)
-        canvas.drawCircle(speedDotX, speedDotY, speedStrokeW * 0.68f, pointerStrokePaint)
+        // Leading Thick Block Bar / Needle on Outer Speedometer Arc
+        val speedLeadRad = Math.toRadians((startAngle + activeSpeedSweep).toDouble())
+        needleBarPaint.strokeWidth = (speedStrokeW * 0.52f).coerceAtLeast(3.5f)
+        needleBarPaint.color = 0xFFFFFFFF.toInt()
+        canvas.drawLine(
+            cx + ((speedBlockInnerR - speedStrokeW * 0.15f) * cos(speedLeadRad)).toFloat(),
+            cy + ((speedBlockInnerR - speedStrokeW * 0.15f) * sin(speedLeadRad)).toFloat(),
+            cx + ((speedBlockOuterR + speedStrokeW * 0.1f) * cos(speedLeadRad)).toFloat(),
+            cy + ((speedBlockOuterR + speedStrokeW * 0.1f) * sin(speedLeadRad)).toFloat(),
+            needleBarPaint
+        )
 
         // ==========================================================
-        // 2. INNER ARC: RPM TACHOMETER (0 .. 8 x1000 r/min)
+        // 2. INNER ARC: RPM TACHOMETER (0 .. 8 x1000 r/min) WITH THICK BLOCKING
         // ==========================================================
-        val rpmRadius = radius * 0.72f
-        val rpmStrokeW = (radius * 0.054f).coerceIn(5.5f, 12f)
+        val rpmRadius = radius * 0.71f
+        val rpmStrokeW = (radius * 0.052f).coerceIn(5.5f, 12f)
         innerArcRect.set(cx - rpmRadius, cy - rpmRadius, cx + rpmRadius, cy + rpmRadius)
 
         bgArcPaint.strokeWidth = rpmStrokeW
-        // RPM zones: 0..4k (Teal), 4k..6k (Amber), 6k..8k (Redline)
         val rpmSweep1 = totalSweep * (4000f / 8000f)
         val rpmSweep2 = totalSweep * (2000f / 8000f)
         val rpmSweep3 = totalSweep * (2000f / 8000f)
@@ -230,35 +281,49 @@ class CenterSpeedArcView(context: Context) : View(context) {
         bgArcPaint.color = zone3Color
         canvas.drawArc(innerArcRect, startAngle + rpmSweep1 + rpmSweep2, rpmSweep3, false, bgArcPaint)
 
-        // Active RPM Arc + Pointer Dot
+        val rpmTickOuter = rpmRadius - rpmStrokeW * 0.45f
+        val rpmTickMajorInner = rpmRadius - rpmStrokeW * 1.48f
+        val rpmTickMinorInner = rpmRadius - rpmStrokeW * 1.05f
+        val rpmTextRadius = rpmRadius - rpmStrokeW * 2.18f
+
+        val rpmFrac = (animRpm / 8000f).coerceIn(0f, 1f)
         val rpmColor = when {
-            rpmValue >= 6000 -> 0xFFEF4444.toInt()
-            rpmValue >= 4000 -> 0xFFF59E0B.toInt()
+            animRpm >= 6000f -> 0xFFEF4444.toInt()
+            animRpm >= 4000f -> 0xFFF59E0B.toInt()
             else -> palette.accent
         }
-        val rpmFrac = (rpmValue / 8000f).coerceIn(0f, 1f)
-        if (rpmValue > 0) {
-            activeArcPaint.strokeWidth = rpmStrokeW
-            activeArcPaint.color = rpmColor
-            canvas.drawArc(innerArcRect, startAngle, totalSweep * rpmFrac, false, activeArcPaint)
-        }
+        val rpmBlockColor = (rpmColor and 0x00FFFFFF) or 0x7A000000
+
+        // Thick Block Sweep Band for RPM
+        val rpmBlockOuterR = rpmRadius + rpmStrokeW * 0.48f
+        val rpmBlockInnerR = rpmTickMajorInner
+        val rpmBlockW = rpmBlockOuterR - rpmBlockInnerR
+        val rpmBlockMidR = (rpmBlockOuterR + rpmBlockInnerR) / 2f
+        innerBlockRect.set(cx - rpmBlockMidR, cy - rpmBlockMidR, cx + rpmBlockMidR, cy + rpmBlockMidR)
+
+        val activeRpmSweep = (totalSweep * rpmFrac).coerceAtLeast(if (animRpm > 20f) 2.5f else 1.5f)
+        thickBlockPaint.strokeWidth = rpmBlockW
+        thickBlockPaint.color = rpmBlockColor
+        canvas.drawArc(innerBlockRect, startAngle, activeRpmSweep, false, thickBlockPaint)
+
+        // Bright Outer Rim of RPM Thick Block
+        activeRimPaint.strokeWidth = rpmStrokeW
+        activeRimPaint.color = rpmColor
+        canvas.drawArc(innerArcRect, startAngle, activeRpmSweep, false, activeRimPaint)
 
         // RPM ticks & numbers (0, 1, 2, 3, 4, 5, 6, 7, 8)
-        val rpmTickOuter = rpmRadius - rpmStrokeW * 0.52f
-        val rpmTickMajorInner = rpmRadius - rpmStrokeW * 1.18f
-        val rpmTickMinorInner = rpmRadius - rpmStrokeW * 0.85f
-        val rpmTextRadius = rpmRadius - rpmStrokeW * 1.88f
-
-        rpmScaleTextPaint.textSize = (radius * 0.052f).coerceIn(8.5f, 15f)
-        for (rpmStep in 0..16) { // each step = 500 RPM
+        rpmScaleTextPaint.textSize = (radius * 0.050f).coerceIn(8.5f, 14.5f)
+        for (rpmStep in 0..16) {
             val frac = rpmStep / 16f
             val deg = startAngle + frac * totalSweep
             val rad = Math.toRadians(deg.toDouble())
             val isMajor = rpmStep % 2 == 0
             val kVal = rpmStep / 2
+            val isPassed = (rpmStep * 500f) <= animRpm + 25f
 
-            tickPaint.strokeWidth = if (isMajor) (rpmStrokeW * 0.20f).coerceAtLeast(1.5f) else (rpmStrokeW * 0.11f).coerceAtLeast(1f)
+            tickPaint.strokeWidth = if (isMajor) (rpmStrokeW * 0.22f).coerceAtLeast(1.5f) else (rpmStrokeW * 0.12f).coerceAtLeast(1f)
             tickPaint.color = when {
+                isPassed -> 0xFFFFFFFF.toInt()
                 kVal >= 6 -> 0xFFEF4444.toInt()
                 kVal >= 4 -> 0xFFF59E0B.toInt()
                 else -> palette.textSecondary
@@ -275,6 +340,7 @@ class CenterSpeedArcView(context: Context) : View(context) {
 
             if (isMajor) {
                 rpmScaleTextPaint.color = when {
+                    isPassed && kVal > 0 -> palette.textPrimary
                     kVal >= 6 -> 0xFFF87171.toInt()
                     kVal >= 4 -> 0xFFFBBF24.toInt()
                     else -> palette.textSecondary
@@ -285,52 +351,16 @@ class CenterSpeedArcView(context: Context) : View(context) {
             }
         }
 
-        // RPM Pointer Dot on Inner Arc
-        val rpmAngleRad = Math.toRadians((startAngle + rpmFrac * totalSweep).toDouble())
-        val rpmDotX = cx + (rpmRadius * cos(rpmAngleRad)).toFloat()
-        val rpmDotY = cy + (rpmRadius * sin(rpmAngleRad)).toFloat()
-        pointerPaint.color = rpmColor
-        canvas.drawCircle(rpmDotX, rpmDotY, rpmStrokeW * 0.72f, pointerPaint)
-        pointerStrokePaint.color = 0xFFFFFFFF.toInt()
-        pointerStrokePaint.strokeWidth = (rpmStrokeW * 0.20f).coerceAtLeast(1.2f)
-        canvas.drawCircle(rpmDotX, rpmDotY, rpmStrokeW * 0.72f, pointerStrokePaint)
-
-        // ==========================================================
-        // 3. CENTER HUB: GEAR POSITION (REPLACING KM/H) + LARGE CLOCK
-        // ==========================================================
-        // Gear Badge + Readout where speed/kmh used to be
-        val gearBadgeW = (radius * 0.34f).coerceIn(48f, 92f)
-        val gearBadgeH = (radius * 0.17f).coerceIn(24f, 44f)
-        val gearCenterY = cy - rpmRadius * 0.43f
-        gearPillRect.set(
-            cx - gearBadgeW / 2f,
-            gearCenterY - gearBadgeH / 2f,
-            cx + gearBadgeW / 2f,
-            gearCenterY + gearBadgeH / 2f
+        // Leading Thick Block Bar / Needle on Inner RPM Arc
+        val rpmLeadRad = Math.toRadians((startAngle + activeRpmSweep).toDouble())
+        needleBarPaint.strokeWidth = (rpmStrokeW * 0.54f).coerceAtLeast(3f)
+        needleBarPaint.color = 0xFFFFFFFF.toInt()
+        canvas.drawLine(
+            cx + ((rpmBlockInnerR - rpmStrokeW * 0.15f) * cos(rpmLeadRad)).toFloat(),
+            cy + ((rpmBlockInnerR - rpmStrokeW * 0.15f) * sin(rpmLeadRad)).toFloat(),
+            cx + ((rpmBlockOuterR + rpmStrokeW * 0.1f) * cos(rpmLeadRad)).toFloat(),
+            cy + ((rpmBlockOuterR + rpmStrokeW * 0.1f) * sin(rpmLeadRad)).toFloat(),
+            needleBarPaint
         )
-
-        gearBadgeFillPaint.color = palette.selectBottom
-        canvas.drawRoundRect(gearPillRect, gearBadgeH * 0.38f, gearBadgeH * 0.38f, gearBadgeFillPaint)
-        gearBadgeStrokePaint.strokeWidth = GlassTheme.dpf(context, 1.2f)
-        gearBadgeStrokePaint.color = palette.accent
-        canvas.drawRoundRect(gearPillRect, gearBadgeH * 0.38f, gearBadgeH * 0.38f, gearBadgeStrokePaint)
-
-        gearTextPaint.color = palette.selectFg
-        gearTextPaint.textSize = (gearBadgeH * 0.64f).coerceIn(14f, 28f)
-        val gearBaselineY = gearPillRect.centerY() + gearTextPaint.textSize * 0.35f
-        canvas.drawText(gearText, cx, gearBaselineY, gearTextPaint)
-
-        // Subtle "GEAR • KM/H & x1000 RPM" legend right below Gear badge
-        metaLabelPaint.color = palette.textMuted
-        metaLabelPaint.textSize = (radius * 0.045f).coerceIn(7.5f, 12f)
-        val shortSrc = if (sourceLabel.contains("OBD")) "OBD-II" else "GPS"
-        val metaY = gearPillRect.bottom + metaLabelPaint.textSize * 1.25f
-        canvas.drawText("GEAR • $shortSrc", cx, metaY, metaLabelPaint)
-
-        // Large Digital Clock below Gear Position
-        clockTextPaint.color = palette.textPrimary
-        clockTextPaint.textSize = (radius * 0.21f).coerceIn(22f, 54f)
-        val clockY = metaY + clockTextPaint.textSize * 1.05f
-        canvas.drawText(clockText, cx, clockY, clockTextPaint)
     }
 }
