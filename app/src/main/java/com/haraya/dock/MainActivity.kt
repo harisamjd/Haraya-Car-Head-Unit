@@ -38,6 +38,7 @@ import com.haraya.dock.calc.PrayerCalc
 import com.haraya.dock.data.QuoteRepository
 import com.haraya.dock.data.TripAndServiceManager
 import com.haraya.dock.data.WeatherFetcher
+import com.haraya.dock.service.FloatingDockService
 import com.haraya.dock.service.NotificationCollectorService
 import com.haraya.dock.theme.ThemeMode
 import com.haraya.dock.theme.ThemeResolver
@@ -58,8 +59,17 @@ import kotlin.math.roundToInt
 
 class MainActivity : Activity(), LocationListener {
 
+    companion object {
+        const val EXTRA_TARGET_SCREEN = "extra_target_screen"
+        const val EXTRA_TARGET_HOME = "HOME"
+        const val EXTRA_TARGET_MAP = "MAP"
+        const val EXTRA_TARGET_OBD = "OBD"
+        const val EXTRA_TARGET_APPS = "APPS"
+    }
+
     enum class AppScreen {
         HOME,
+        MAP,
         OBD,
         APPS
     }
@@ -81,6 +91,7 @@ class MainActivity : Activity(), LocationListener {
     private var palette: GlassPalette = GlassTheme.Dark
     private var currentScreen: AppScreen = AppScreen.HOME
     private var quoteIndex: Int = 0
+    private var floatingDockEnabled: Boolean = true
 
     private lateinit var tripServiceManager: TripAndServiceManager
     private lateinit var weatherFetcher: WeatherFetcher
@@ -97,6 +108,7 @@ class MainActivity : Activity(), LocationListener {
     private lateinit var rootFrame: FrameLayout
     private lateinit var silkBackground: SilkBackgroundView
     private lateinit var mainShell: LinearLayout
+    private lateinit var contentFrame: FrameLayout
     private lateinit var sidebarLayout: LinearLayout
     private val sidebarItems = mutableListOf<SidebarItemView>()
     private lateinit var themeSidebarItem: SidebarItemView
@@ -200,6 +212,7 @@ class MainActivity : Activity(), LocationListener {
         val savedStyle = prefs.getString("home_style", HomeStyle.CAR_COCKPIT.name) ?: HomeStyle.CAR_COCKPIT.name
         homeStyle = runCatching { HomeStyle.valueOf(savedStyle) }.getOrDefault(HomeStyle.CAR_COCKPIT)
         quoteIndex = prefs.getInt("quote_idx", 0)
+        floatingDockEnabled = prefs.getBoolean("floating_dock_enabled", true)
 
         tripServiceManager = TripAndServiceManager(this)
         weatherFetcher = WeatherFetcher(this)
@@ -211,7 +224,7 @@ class MainActivity : Activity(), LocationListener {
             FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         )
 
-        // 1. TAMPILAN COCKPIT MOBIL TENGAH (Suzuki Baleno - 3 Kolom + Top Bar + Bottom Dock)
+        // 1. TAMPILAN COCKPIT MOBIL TENGAH (Suzuki Baleno - 3 Kolom + Top Bar + Bottom Dock + Embedded Stage)
         carCockpitView = CarCockpitView(
             context = this,
             tripServiceManager = tripServiceManager,
@@ -224,7 +237,13 @@ class MainActivity : Activity(), LocationListener {
             onSwitchToClassicLayout = {
                 setHomeStyle(HomeStyle.CLASSIC_SILK)
             },
-            onOpenMaps = {
+            onSelectHomeStage = {
+                setScreen(AppScreen.HOME)
+            },
+            onSelectMapStage = {
+                setScreen(AppScreen.MAP)
+            },
+            onOpenExternalMaps = {
                 launchPackageOrMarket(listOf("com.google.android.apps.maps", "com.waze"), "Google Maps")
             },
             onShareLiveLocation = {
@@ -283,7 +302,7 @@ class MainActivity : Activity(), LocationListener {
             }
         )
 
-        val contentFrame = FrameLayout(this)
+        contentFrame = FrameLayout(this)
 
         homeCockpitLayout = buildHomeCockpit()
         obdDashboardLayout = buildObdDashboard()
@@ -318,6 +337,7 @@ class MainActivity : Activity(), LocationListener {
         setContentView(rootFrame)
 
         setScreen(AppScreen.HOME)
+        handleIncomingDockIntent(intent)
         refreshAll()
         requestLocationPermissionIfNeeded()
         loadInstalledAppsAsync()
@@ -328,8 +348,26 @@ class MainActivity : Activity(), LocationListener {
         }
     }
 
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIncomingDockIntent(intent)
+    }
+
+    private fun handleIncomingDockIntent(intent: Intent?) {
+        val target = intent?.getStringExtra(EXTRA_TARGET_SCREEN) ?: return
+        when (target) {
+            EXTRA_TARGET_HOME -> setScreen(AppScreen.HOME)
+            EXTRA_TARGET_MAP -> setScreen(AppScreen.MAP)
+            EXTRA_TARGET_OBD -> setScreen(AppScreen.OBD)
+            EXTRA_TARGET_APPS -> setScreen(AppScreen.APPS)
+        }
+        intent.removeExtra(EXTRA_TARGET_SCREEN)
+    }
+
     override fun onResume() {
         super.onResume()
+        FloatingDockService.hideOverlayInMainApp(this)
         registerReceiver(timeTickReceiver, IntentFilter().apply {
             addAction(Intent.ACTION_TIME_TICK)
             addAction(Intent.ACTION_TIME_CHANGED)
@@ -345,12 +383,15 @@ class MainActivity : Activity(), LocationListener {
             unregisterReceiver(timeTickReceiver)
         } catch (_: Exception) {
         }
+        if (floatingDockEnabled && FloatingDockService.canDrawOverlays(this)) {
+            FloatingDockService.showOverlayWhenLeavingApp(this, currentKmh, palette.isDark)
+        }
         super.onPause()
     }
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
-        // Tombol kembali tidak menutup launcher, melainkan kembali ke Beranda jika di OBD atau Apps Drawer
+        // Tombol kembali tidak menutup launcher, melainkan kembali ke Beranda jika di Peta, OBD, atau Apps Drawer
         if (currentScreen != AppScreen.HOME) {
             setScreen(AppScreen.HOME)
         }
@@ -367,32 +408,45 @@ class MainActivity : Activity(), LocationListener {
     private fun setScreen(screen: AppScreen) {
         val screenChanged = currentScreen != screen
         currentScreen = screen
-        val showCarCockpit = (screen == AppScreen.HOME && homeStyle == HomeStyle.CAR_COCKPIT)
-        carCockpitView.visibility = if (showCarCockpit) View.VISIBLE else View.GONE
-        mainShell.visibility = if (showCarCockpit) View.GONE else View.VISIBLE
-        silkBackground.visibility = if (showCarCockpit) View.GONE else View.VISIBLE
 
-        homeCockpitLayout.visibility = if (screen == AppScreen.HOME && homeStyle == HomeStyle.CLASSIC_SILK) View.VISIBLE else View.GONE
-        obdDashboardLayout.visibility = if (screen == AppScreen.OBD) View.VISIBLE else View.GONE
-        appsDrawerLayout.visibility = if (screen == AppScreen.APPS) View.VISIBLE else View.GONE
+        if (homeStyle == HomeStyle.CAR_COCKPIT) {
+            // Mode Cockpit Mobil: Top Bar & Bottom Dock SELALU terlihat, semua layar (Home, Peta, OBD, Aplikasi)
+            // di-embed langsung di tengah-tengah CarCockpitView!
+            carCockpitView.visibility = View.VISIBLE
+            mainShell.visibility = View.GONE
+            silkBackground.visibility = View.GONE
 
-        val activeTarget: View = when {
-            showCarCockpit -> carCockpitView
-            screen == AppScreen.OBD -> obdDashboardLayout
-            screen == AppScreen.APPS -> appsDrawerLayout
-            else -> homeCockpitLayout
-        }
-        if (screenChanged) {
-            activeTarget.alpha = 0f
-            activeTarget.scaleX = 0.985f
-            activeTarget.scaleY = 0.985f
-            activeTarget.animate()
-                .alpha(1f)
-                .scaleX(1f)
-                .scaleY(1f)
-                .setDuration(140L)
-                .withLayer()
-                .start()
+            val stage = when (screen) {
+                AppScreen.HOME -> CarCockpitView.CockpitStage.HOME
+                AppScreen.MAP -> CarCockpitView.CockpitStage.MAP
+                AppScreen.OBD -> CarCockpitView.CockpitStage.OBD
+                AppScreen.APPS -> CarCockpitView.CockpitStage.APPS
+            }
+            carCockpitView.setCockpitStage(stage, obdDashboardLayout, appsDrawerLayout)
+        } else {
+            // Mode Sutra Klasik: Sidebar Kiri tetap terlihat
+            carCockpitView.visibility = View.GONE
+            mainShell.visibility = View.VISIBLE
+            silkBackground.visibility = View.VISIBLE
+
+            if (obdDashboardLayout.parent !== contentFrame) {
+                (obdDashboardLayout.parent as? ViewGroup)?.removeView(obdDashboardLayout)
+                contentFrame.addView(
+                    obdDashboardLayout,
+                    FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                )
+            }
+            if (appsDrawerLayout.parent !== contentFrame) {
+                (appsDrawerLayout.parent as? ViewGroup)?.removeView(appsDrawerLayout)
+                contentFrame.addView(
+                    appsDrawerLayout,
+                    FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                )
+            }
+
+            homeCockpitLayout.visibility = if (screen == AppScreen.HOME || screen == AppScreen.MAP) View.VISIBLE else View.GONE
+            obdDashboardLayout.visibility = if (screen == AppScreen.OBD) View.VISIBLE else View.GONE
+            appsDrawerLayout.visibility = if (screen == AppScreen.APPS) View.VISIBLE else View.GONE
         }
 
         if (screen == AppScreen.APPS && allApps.isEmpty()) {
@@ -1693,14 +1747,56 @@ class MainActivity : Activity(), LocationListener {
         val notifOk = NotificationCollectorService.isNotificationAccessGranted(this)
         val launcherOk = isDefaultLauncher()
         val gpsOk = isGpsProviderActive()
+        val overlayPermOk = FloatingDockService.canDrawOverlays(this)
+        val floatingActive = overlayPermOk && floatingDockEnabled
 
         HarayaDialog.showCustomModal(
             context = this,
             palette = palette,
             title = "Pengaturan Haraya Dock",
-            subtitle = "Konfigurasi keamanan servis, identitas kendaraan, & izin sistem",
+            subtitle = "Konfigurasi keamanan servis, identitas kendaraan, & mode embedded",
             contentBuilder = { container, dlg ->
                 val rows = listOf(
+                    HarayaDialog.buildOptionRow(
+                        context = this,
+                        palette = palette,
+                        title = "Floating Dock Saat Buka Aplikasi Lain (Embedded Mode)",
+                        subtitle = when {
+                            !overlayPermOk -> "Izinkan Tampil di Atas Aplikasi Lain agar Dock tetap terlihat saat buka YouTube/Maps"
+                            floatingDockEnabled -> "Dock Bawah tetap tampil saat membuka aplikasi eksternal (Ketuk untuk Nonaktifkan)"
+                            else -> "Floating Dock dinonaktifkan (Ketuk untuk Aktifkan)"
+                        },
+                        badgeText = when {
+                            !overlayPermOk -> "Izinkan"
+                            floatingDockEnabled -> "Aktif ✓"
+                            else -> "Nonaktif"
+                        },
+                        badgePositive = floatingActive
+                    ) {
+                        dlg.dismiss()
+                        if (!overlayPermOk) {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                                runCatching {
+                                    startActivity(
+                                        Intent(
+                                            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                            Uri.parse("package:$packageName")
+                                        ).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK }
+                                    )
+                                }
+                            }
+                        } else {
+                            floatingDockEnabled = !floatingDockEnabled
+                            getSharedPreferences("haraya_prefs", Context.MODE_PRIVATE)
+                                .edit().putBoolean("floating_dock_enabled", floatingDockEnabled).apply()
+                            val msg = if (floatingDockEnabled) {
+                                "Floating Dock diaktifkan saat membuka aplikasi eksternal"
+                            } else {
+                                "Floating Dock dinonaktifkan"
+                            }
+                            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+                        }
+                    },
                     HarayaDialog.buildOptionRow(
                         context = this,
                         palette = palette,
@@ -1974,6 +2070,7 @@ class MainActivity : Activity(), LocationListener {
         speedGauge.setSpeed(currentKmh)
         obdSpeedGauge.setSpeed(currentKmh)
         carCockpitView.updateSpeed(currentKmh)
+        FloatingDockService.notifyStateUpdated(this, currentKmh, palette.isDark)
 
         tripServiceManager.onLocationUpdate(location)
         carCockpitView.refreshTripAndServices()

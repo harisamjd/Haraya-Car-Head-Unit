@@ -3,6 +3,7 @@ package com.haraya.dock.ui
 import android.content.Context
 import android.graphics.*
 import android.util.LruCache
+import android.view.MotionEvent
 import android.view.View
 import com.haraya.dock.ui.glass.GlassPalette
 import com.haraya.dock.ui.glass.GlassTheme
@@ -12,17 +13,18 @@ import java.util.concurrent.Executors
 import kotlin.math.*
 
 /**
- * Live OpenStreetMap Slippy Tile Renderer (tile.openstreetmap.org, z=15)
- * tanpa butuh API Key, lengkap dengan filter Dark-Slate otomotif (0% ungu)
- * dan fallback vektor offline.
+ * Live OpenStreetMap Slippy Tile Renderer (tile.openstreetmap.org)
+ * Mendukung mode mini-card maupun mode Embedded Interactive Map (geser peta dengan jari & zoom 12..18).
  */
-class MapCanvasView(context: Context) : View(context) {
+class MapCanvasView(
+    context: Context,
+    private val interactivePanZoom: Boolean = false
+) : View(context) {
 
     companion object {
-        private const val ZOOM = 15
-        private val tileCache = object : LruCache<String, Bitmap>(64) {}
+        private val tileCache = object : LruCache<String, Bitmap>(96) {}
         private val inflightKeys = mutableSetOf<String>()
-        private val executor = Executors.newFixedThreadPool(3)
+        private val executor = Executors.newFixedThreadPool(4)
 
         // Filter matriks warna netral Carbon-Slate (tanpa bias ungu) untuk peta Dark Mode
         private val DARK_MAP_FILTER = ColorMatrixColorFilter(
@@ -35,14 +37,48 @@ class MapCanvasView(context: Context) : View(context) {
         )
     }
 
+    private var zoomLevel: Int = 15
     private var cachedBitmap: Bitmap? = null
     private var palette: GlassPalette = GlassTheme.Dark
     private var currentLat: Double = -6.4931
     private var currentLon: Double = 106.8056
     private var streetLabel: String = "Mencari Jalan..."
 
+    // Offset geser jari pada mode interaktif (dalam piksel tile)
+    private var panOffsetPxX: Float = 0f
+    private var panOffsetPxY: Float = 0f
+    private var lastTouchX: Float = 0f
+    private var lastTouchY: Float = 0f
+    private var isDragging: Boolean = false
+
     private val tilePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val overlayPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    fun zoomIn() {
+        if (zoomLevel < 18) {
+            zoomLevel++
+            panOffsetPxX *= 2f
+            panOffsetPxY *= 2f
+            invalidate()
+        }
+    }
+
+    fun zoomOut() {
+        if (zoomLevel > 11) {
+            zoomLevel--
+            panOffsetPxX *= 0.5f
+            panOffsetPxY *= 0.5f
+            invalidate()
+        }
+    }
+
+    fun recenterOnCar() {
+        panOffsetPxX = 0f
+        panOffsetPxY = 0f
+        invalidate()
+    }
+
+    fun getZoomLevel(): Int = zoomLevel
 
     fun updateLocation(lat: Double, lon: Double, label: String? = null) {
         val moved = abs(lat - currentLat) > 0.0001 || abs(lon - currentLon) > 0.0001
@@ -67,6 +103,49 @@ class MapCanvasView(context: Context) : View(context) {
         }
     }
 
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (!interactivePanZoom) {
+            return super.onTouchEvent(event)
+        }
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                lastTouchX = event.x
+                lastTouchY = event.y
+                isDragging = false
+                parent?.requestDisallowInterceptTouchEvent(true)
+                return true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val dx = event.x - lastTouchX
+                val dy = event.y - lastTouchY
+                if (abs(dx) > 3f || abs(dy) > 3f) {
+                    isDragging = true
+                }
+                if (isDragging) {
+                    panOffsetPxX += dx
+                    panOffsetPxY += dy
+                    lastTouchX = event.x
+                    lastTouchY = event.y
+                    invalidate()
+                }
+                return true
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                parent?.requestDisallowInterceptTouchEvent(false)
+                if (!isDragging) {
+                    performClick()
+                }
+                isDragging = false
+                return true
+            }
+        }
+        return super.onTouchEvent(event)
+    }
+
+    override fun performClick(): Boolean {
+        return super.performClick()
+    }
+
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         tilePaint.colorFilter = if (palette.isDark) DARK_MAP_FILTER else null
@@ -87,25 +166,26 @@ class MapCanvasView(context: Context) : View(context) {
             cachedBitmap?.let { canvas.drawBitmap(it, 0f, 0f, null) }
         }
 
-        // Gambar titik posisi kendaraan di tengah peta
-        val carX = w * 0.50f
-        val carY = h * 0.50f
+        // Titik posisi kendaraan (ikut bergeser jika peta di-pan)
+        val carX = w * 0.50f + panOffsetPxX
+        val carY = h * 0.50f + panOffsetPxY
         overlayPaint.style = Paint.Style.FILL
         overlayPaint.color = (palette.accent and 0x00FFFFFF) or 0x44000000
-        canvas.drawCircle(carX, carY, GlassTheme.dp(context, 15f).toFloat(), overlayPaint)
+        canvas.drawCircle(carX, carY, GlassTheme.dp(context, 16f).toFloat(), overlayPaint)
 
         overlayPaint.color = 0xFFFFFFFF.toInt()
-        canvas.drawCircle(carX, carY, GlassTheme.dp(context, 6.8f).toFloat(), overlayPaint)
+        canvas.drawCircle(carX, carY, GlassTheme.dp(context, 7f).toFloat(), overlayPaint)
 
         overlayPaint.color = palette.accent
-        canvas.drawCircle(carX, carY, GlassTheme.dp(context, 4.6f).toFloat(), overlayPaint)
+        canvas.drawCircle(carX, carY, GlassTheme.dp(context, 4.8f).toFloat(), overlayPaint)
     }
 
     private fun drawLiveOsmTiles(canvas: Canvas, w: Float, h: Float): Boolean {
-        val n = (1 shl ZOOM).toDouble()
-        val exactX = (currentLon + 180.0) / 360.0 * n
+        val z = zoomLevel
+        val n = (1 shl z).toDouble()
+        val exactX = (currentLon + 180.0) / 360.0 * n - (panOffsetPxX / 256.0)
         val latRad = Math.toRadians(currentLat.coerceIn(-85.0, 85.0))
-        val exactY = (1.0 - ln(tan(latRad) + 1.0 / cos(latRad)) / Math.PI) / 2.0 * n
+        val exactY = (1.0 - ln(tan(latRad) + 1.0 / cos(latRad)) / Math.PI) / 2.0 * n - (panOffsetPxY / 256.0)
 
         val centerTileX = floor(exactX).toInt()
         val centerTileY = floor(exactY).toInt()
@@ -115,14 +195,17 @@ class MapCanvasView(context: Context) : View(context) {
         val centerX = w * 0.50f
         val centerY = h * 0.50f
 
+        val rangeX = if (interactivePanZoom) 3 else 1
+        val rangeY = if (interactivePanZoom) 2 else 1
+
         var drawnCount = 0
-        for (dx in -1..1) {
-            for (dy in -1..1) {
+        for (dx in -rangeX..rangeX) {
+            for (dy in -rangeY..rangeY) {
                 val tx = centerTileX + dx
                 val ty = centerTileY + dy
                 if (tx < 0 || ty < 0 || tx >= n.toInt() || ty >= n.toInt()) continue
 
-                val key = "osm_v3/$ZOOM/$tx/$ty"
+                val key = "osm_v3/$z/$tx/$ty"
                 val bmp = tileCache.get(key)
                 val left = centerX - offsetPxX + dx * 256f
                 val top = centerY - offsetPxY + dy * 256f
@@ -131,7 +214,7 @@ class MapCanvasView(context: Context) : View(context) {
                     canvas.drawBitmap(bmp, left, top, tilePaint)
                     drawnCount++
                 } else {
-                    fetchOsmTileAsync(ZOOM, tx, ty, key)
+                    fetchOsmTileAsync(z, tx, ty, key)
                 }
             }
         }
@@ -149,7 +232,7 @@ class MapCanvasView(context: Context) : View(context) {
                 val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
                     connectTimeout = 5000
                     readTimeout = 5000
-                    setRequestProperty("User-Agent", "HarayaDock/1.2 (https://github.com/harisamjd/Haraya-Car-Head-Unit)")
+                    setRequestProperty("User-Agent", "HarayaDock/1.3 (https://github.com/harisamjd/Haraya-Car-Head-Unit)")
                 }
                 if (conn.responseCode == 200) {
                     val bmp = conn.inputStream.use { BitmapFactory.decodeStream(it) }

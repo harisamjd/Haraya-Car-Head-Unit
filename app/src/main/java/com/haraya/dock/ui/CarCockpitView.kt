@@ -29,7 +29,9 @@ class CarCockpitView(
     private val tripServiceManager: TripAndServiceManager,
     private val onSwitchThemeMode: (ThemeMode) -> Unit,
     private val onSwitchToClassicLayout: () -> Unit,
-    private val onOpenMaps: () -> Unit,
+    private val onSelectHomeStage: () -> Unit,
+    private val onSelectMapStage: () -> Unit,
+    private val onOpenExternalMaps: () -> Unit,
     private val onShareLiveLocation: () -> Unit,
     private val onGpsPillClicked: () -> Unit,
     private val onOpenMusic: () -> Unit,
@@ -40,11 +42,40 @@ class CarCockpitView(
     private val onOpenAppsScreen: () -> Unit
 ) : LinearLayout(context) {
 
+    enum class CockpitStage {
+        HOME,
+        MAP,
+        OBD,
+        APPS
+    }
+
     private var palette: GlassPalette = GlassTheme.Dark
+    private var activeStage: CockpitStage = CockpitStage.HOME
     private var quoteIdx: Int = 0
     private var seatbeltBannerDismissed: Boolean = false
     private var isGpsActive: Boolean = false
     private var optimisticPlayingToggle: Boolean? = null
+
+    // Stage Host Frame (di antara Top Bar dan Bottom Dock)
+    private val stageHostFrame: FrameLayout
+    private val mainColumnsRow: LinearLayout
+
+    // Embedded Full-Screen Interactive Map Stage
+    private val embeddedMapCard: GlassCardView
+    private val embeddedMapCanvas: MapCanvasView
+    private val embeddedMapHeaderBar: LinearLayout
+    private val embeddedMapTitleTv: TextView
+    private val embeddedMapSubTv: TextView
+    private val embeddedMapShareBtn: TextView
+    private val embeddedMapExternalBtn: TextView
+    private val embeddedMapZoomInBtn: TextView
+    private val embeddedMapZoomOutBtn: TextView
+    private val embeddedMapRecenterBtn: TextView
+    private val embeddedMapBackHomeBtn: TextView
+
+    // Referensi tampilan OBD & Apps Drawer yang di-embed ke dalam stageHostFrame
+    private var embeddedObdView: View? = null
+    private var embeddedAppsView: View? = null
 
     // Top Bar
     private val topBarLayout: LinearLayout
@@ -235,9 +266,11 @@ class CarCockpitView(
         })
 
         // ==========================================
-        // 2. MAIN 3-COLUMN COCKPIT AREA
+        // 2. MAIN 3-COLUMN COCKPIT AREA & EMBEDDED STAGE HOST
         // ==========================================
-        val mainColumnsRow = LinearLayout(context).apply {
+        stageHostFrame = FrameLayout(context)
+
+        mainColumnsRow = LinearLayout(context).apply {
             orientation = HORIZONTAL
         }
 
@@ -285,7 +318,7 @@ class CarCockpitView(
         mapViewport = FrameLayout(context)
         GlassTheme.clipRound(context, mapViewport, 10f)
         mapCanvas = MapCanvasView(context).apply {
-            setOnClickListener { onOpenMaps() }
+            setOnClickListener { onSelectMapStage() }
         }
         mapViewport.addView(mapCanvas, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         mapCol.addView(mapViewport, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f).apply {
@@ -837,7 +870,146 @@ class CarCockpitView(
 
         mainColumnsRow.addView(rightCol, LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.29f))
 
-        addView(mainColumnsRow, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f).apply {
+        stageHostFrame.addView(
+            mainColumnsRow,
+            FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        )
+
+        // ==========================================
+        // 2D. EMBEDDED INTERACTIVE MAP STAGE (Di dalam Dock)
+        // ==========================================
+        embeddedMapCard = GlassCardView(context).apply {
+            setPadding(dp(8f), dp(8f), dp(8f), dp(8f))
+            visibility = View.GONE
+        }
+        val embeddedMapFrame = FrameLayout(context)
+        GlassTheme.clipRound(context, embeddedMapFrame, 12f)
+
+        embeddedMapCanvas = MapCanvasView(context, interactivePanZoom = true)
+        embeddedMapFrame.addView(
+            embeddedMapCanvas,
+            FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        )
+
+        // Top Floating Overlay Bar di dalam Peta Embedded
+        embeddedMapHeaderBar = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12f), dp(8f), dp(12f), dp(8f))
+        }
+        val embLocCol = LinearLayout(context).apply { orientation = VERTICAL }
+        embeddedMapTitleTv = TextView(context).apply {
+            text = "PETA NAVIGASI INTERAKTIF"
+            textSize = 11.5f
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+            includeFontPadding = false
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+        }
+        embeddedMapSubTv = TextView(context).apply {
+            text = "Geser peta dengan jari • Gunakan tombol +/- untuk zoom"
+            textSize = 9.5f
+            includeFontPadding = false
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+        }
+        embLocCol.addView(embeddedMapTitleTv)
+        embLocCol.addView(embeddedMapSubTv, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            topMargin = dp(2f)
+        })
+        embeddedMapHeaderBar.addView(embLocCol, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+            rightMargin = dp(8f)
+        })
+
+        embeddedMapShareBtn = TextView(context).apply {
+            text = "Bagikan Lokasi Live"
+            textSize = 9.5f
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+            includeFontPadding = false
+            setPadding(dp(10f), dp(6f), dp(10f), dp(6f))
+            setOnClickListener { onShareLiveLocation() }
+        }
+        embeddedMapExternalBtn = TextView(context).apply {
+            text = "Buka Google Maps"
+            textSize = 9.5f
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+            includeFontPadding = false
+            setPadding(dp(10f), dp(6f), dp(10f), dp(6f))
+            setOnClickListener { onOpenExternalMaps() }
+        }
+        embeddedMapBackHomeBtn = TextView(context).apply {
+            text = "Kembali"
+            textSize = 9.5f
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+            includeFontPadding = false
+            setPadding(dp(10f), dp(6f), dp(10f), dp(6f))
+            setOnClickListener { onSelectHomeStage() }
+        }
+        embeddedMapHeaderBar.addView(embeddedMapShareBtn, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            rightMargin = dp(6f)
+        })
+        embeddedMapHeaderBar.addView(embeddedMapExternalBtn, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            rightMargin = dp(6f)
+        })
+        embeddedMapHeaderBar.addView(embeddedMapBackHomeBtn)
+
+        embeddedMapFrame.addView(
+            embeddedMapHeaderBar,
+            FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP).apply {
+                leftMargin = dp(10f)
+                rightMargin = dp(10f)
+                topMargin = dp(10f)
+            }
+        )
+
+        // Tombol Zoom In (+), Zoom Out (-), dan Fokus Mobil (◎) di Kanan Bawah Peta
+        val mapControlsCol = LinearLayout(context).apply {
+            orientation = VERTICAL
+            gravity = Gravity.END
+        }
+        fun buildMapFloatingBtn(label: String, onClick: () -> Unit): TextView {
+            return TextView(context).apply {
+                text = label
+                textSize = 11f
+                typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+                gravity = Gravity.CENTER
+                includeFontPadding = false
+                setPadding(dp(12f), dp(8f), dp(12f), dp(8f))
+                setOnClickListener { onClick() }
+            }
+        }
+        embeddedMapZoomInBtn = buildMapFloatingBtn("＋ Perbesar") {
+            embeddedMapCanvas.zoomIn()
+        }
+        embeddedMapZoomOutBtn = buildMapFloatingBtn("－ Perkecil") {
+            embeddedMapCanvas.zoomOut()
+        }
+        embeddedMapRecenterBtn = buildMapFloatingBtn("◎ Fokus Mobil") {
+            embeddedMapCanvas.recenterOnCar()
+        }
+        mapControlsCol.addView(embeddedMapZoomInBtn, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            bottomMargin = dp(6f)
+        })
+        mapControlsCol.addView(embeddedMapZoomOutBtn, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            bottomMargin = dp(6f)
+        })
+        mapControlsCol.addView(embeddedMapRecenterBtn, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+
+        embeddedMapFrame.addView(
+            mapControlsCol,
+            FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.END).apply {
+                rightMargin = dp(10f)
+                bottomMargin = dp(10f)
+            }
+        )
+
+        embeddedMapCard.addView(embeddedMapFrame, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        stageHostFrame.addView(
+            embeddedMapCard,
+            FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        )
+
+        addView(stageHostFrame, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f).apply {
             bottomMargin = dp(5f)
         })
 
@@ -852,7 +1024,8 @@ class CarCockpitView(
         }
 
         val dockSpecs = listOf(
-            Triple(VectorIconView.IconType.HOME, "BERANDA") { },
+            Triple(VectorIconView.IconType.HOME, "BERANDA") { onSelectHomeStage() },
+            Triple(VectorIconView.IconType.MAPS, "PETA") { onSelectMapStage() },
             Triple(VectorIconView.IconType.MUSIC, "MEDIA") { onOpenMusic() },
             Triple(VectorIconView.IconType.PHONE, "TELEPON") { onOpenPhone() },
             Triple(VectorIconView.IconType.GAUGE, "OBD & MESIN") { onOpenObdScreen() },
@@ -968,15 +1141,71 @@ class CarCockpitView(
         refreshMediaState()
     }
 
+    fun setCockpitStage(stage: CockpitStage, obdView: View, appsView: View) {
+        activeStage = stage
+        embeddedObdView = obdView
+        embeddedAppsView = appsView
+
+        // Pastikan obdView & appsView terpasang di dalam stageHostFrame ketika mode CarCockpit aktif
+        if (obdView.parent !== stageHostFrame) {
+            (obdView.parent as? ViewGroup)?.removeView(obdView)
+            stageHostFrame.addView(
+                obdView,
+                FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            )
+        }
+        if (appsView.parent !== stageHostFrame) {
+            (appsView.parent as? ViewGroup)?.removeView(appsView)
+            stageHostFrame.addView(
+                appsView,
+                FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            )
+        }
+
+        mainColumnsRow.visibility = if (stage == CockpitStage.HOME) View.VISIBLE else View.GONE
+        embeddedMapCard.visibility = if (stage == CockpitStage.MAP) View.VISIBLE else View.GONE
+        obdView.visibility = if (stage == CockpitStage.OBD) View.VISIBLE else View.GONE
+        appsView.visibility = if (stage == CockpitStage.APPS) View.VISIBLE else View.GONE
+
+        styleDockTabs()
+    }
+
+    private fun styleDockTabs() {
+        for (i in dockTabBoxes.indices) {
+            val active = when (i) {
+                0 -> activeStage == CockpitStage.HOME
+                1 -> activeStage == CockpitStage.MAP
+                4 -> activeStage == CockpitStage.OBD
+                6 -> activeStage == CockpitStage.APPS
+                else -> false
+            }
+            if (active) {
+                dockTabBoxes[i].background = GlassTheme.selectDrawable(context, palette, 10f)
+                dockTabIcons[i].setTint(palette.selectFg)
+                dockTabLabels[i].setTextColor(palette.selectFg)
+            } else {
+                dockTabBoxes[i].background = null
+                GlassTheme.makePressable(context, dockTabBoxes[i], palette, 10f)
+                dockTabIcons[i].setTint(palette.textSecondary)
+                dockTabLabels[i].setTextColor(palette.textSecondary)
+            }
+        }
+    }
+
     fun updateLocationInfo(lat: Double, lon: Double, placeTitle: String, streetDetail: String, coordSub: String) {
         mapHeaderTv.text = placeTitle.uppercase(Locale.getDefault())
         val cleanStreet = streetDetail.trim()
-        mapFooterTv.text = if (cleanStreet.isNotEmpty() && !cleanStreet.equals("Mencari Jalan...", ignoreCase = true)) {
+        val combinedFooter = if (cleanStreet.isNotEmpty() && !cleanStreet.equals("Mencari Jalan...", ignoreCase = true)) {
             "$cleanStreet • $coordSub"
         } else {
             coordSub
         }
+        mapFooterTv.text = combinedFooter
         mapCanvas.updateLocation(lat, lon, cleanStreet.ifBlank { placeTitle })
+
+        embeddedMapTitleTv.text = placeTitle.uppercase(Locale.getDefault())
+        embeddedMapSubTv.text = combinedFooter
+        embeddedMapCanvas.updateLocation(lat, lon, cleanStreet.ifBlank { placeTitle })
     }
 
     fun updateWeather(weather: WeatherState) {
@@ -1443,21 +1672,33 @@ class CarCockpitView(
         weatherTempTv.setTextColor(palette.textPrimary)
         weatherDescTv.setTextColor(palette.textPrimary)
 
+        // Embedded Interactive Map Stage
+        embeddedMapCard.applyTheme(palette)
+        embeddedMapCanvas.applyTheme(palette)
+        embeddedMapHeaderBar.background = GlassTheme.overDrawable(context, palette, 12f)
+        embeddedMapTitleTv.setTextColor(palette.textPrimary)
+        embeddedMapSubTv.setTextColor(palette.textSecondary)
+        embeddedMapShareBtn.background = GlassTheme.accentButtonDrawable(context, palette, 8f)
+        embeddedMapShareBtn.setTextColor(if (palette.isDark) 0xFF0B0E11.toInt() else 0xFFFFFFFF.toInt())
+        GlassTheme.makePressable(context, embeddedMapShareBtn, palette, 8f)
+
+        embeddedMapExternalBtn.background = GlassTheme.innerDrawable(context, palette, 8f)
+        embeddedMapExternalBtn.setTextColor(palette.textPrimary)
+        GlassTheme.makePressable(context, embeddedMapExternalBtn, palette, 8f)
+
+        embeddedMapBackHomeBtn.background = GlassTheme.innerDrawable(context, palette, 8f)
+        embeddedMapBackHomeBtn.setTextColor(palette.textSecondary)
+        GlassTheme.makePressable(context, embeddedMapBackHomeBtn, palette, 8f)
+
+        for (btn in listOf(embeddedMapZoomInBtn, embeddedMapZoomOutBtn, embeddedMapRecenterBtn)) {
+            btn.background = GlassTheme.overDrawable(context, palette, 10f)
+            btn.setTextColor(palette.textPrimary)
+            GlassTheme.makePressable(context, btn, palette, 10f)
+        }
+
         // Bottom Dock
         bottomDockCard.applyTheme(palette)
-        for (i in dockTabBoxes.indices) {
-            val active = (i == 0)
-            if (active) {
-                dockTabBoxes[i].background = GlassTheme.selectDrawable(context, palette, 10f)
-                dockTabIcons[i].setTint(palette.selectFg)
-                dockTabLabels[i].setTextColor(palette.selectFg)
-            } else {
-                dockTabBoxes[i].background = null
-                GlassTheme.makePressable(context, dockTabBoxes[i], palette, 10f)
-                dockTabIcons[i].setTint(palette.textSecondary)
-                dockTabLabels[i].setTextColor(palette.textSecondary)
-            }
-        }
+        styleDockTabs()
 
         refreshTripAndServices()
         refreshMediaState()
