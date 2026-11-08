@@ -51,7 +51,8 @@ class VectorIconView(
         ZOOM_IN,
         ZOOM_OUT,
         RECENTER_DOT,
-        ASSISTIVE_ORB
+        ASSISTIVE_ORB,
+        POWER
     }
 
     private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -287,20 +288,36 @@ class VectorIconView(
             }
 
             IconType.GEAR_COG -> {
-                // Roda gigi transmisi / setelan
-                canvas.drawCircle(cx, cy, 3.2f * u, strokePaint)
-                for (i in 0 until 8) {
-                    val angle = Math.toRadians((i * 45).toDouble())
-                    val r1 = 4.6f * u
-                    val r2 = 7.4f * u
-                    canvas.drawLine(
-                        cx + (r1 * cos(angle)).toFloat(),
-                        cy + (r1 * sin(angle)).toFloat(),
-                        cx + (r2 * cos(angle)).toFloat(),
-                        cy + (r2 * sin(angle)).toFloat(),
-                        strokePaint
-                    )
+                // Roda gigi mekanis 6-gerigi menyatu (berbeda tegas dari ikon matahari)
+                val teeth = 6
+                val rOuter = 7.8f * u
+                val rInner = 5.4f * u
+                for (i in 0 until teeth) {
+                    val baseDeg = i * (360f / teeth)
+                    val a1 = Math.toRadians((baseDeg - 13f).toDouble())
+                    val a2 = Math.toRadians((baseDeg + 13f).toDouble())
+                    val a3 = Math.toRadians((baseDeg + 23f).toDouble())
+                    val a4 = Math.toRadians((baseDeg + 37f).toDouble())
+                    val p1x = cx + (rOuter * cos(a1)).toFloat()
+                    val p1y = cy + (rOuter * sin(a1)).toFloat()
+                    val p2x = cx + (rOuter * cos(a2)).toFloat()
+                    val p2y = cy + (rOuter * sin(a2)).toFloat()
+                    val p3x = cx + (rInner * cos(a3)).toFloat()
+                    val p3y = cy + (rInner * sin(a3)).toFloat()
+                    val p4x = cx + (rInner * cos(a4)).toFloat()
+                    val p4y = cy + (rInner * sin(a4)).toFloat()
+                    if (i == 0) {
+                        path.moveTo(p1x, p1y)
+                    } else {
+                        path.lineTo(p1x, p1y)
+                    }
+                    path.lineTo(p2x, p2y)
+                    path.lineTo(p3x, p3y)
+                    path.lineTo(p4x, p4y)
                 }
+                path.close()
+                canvas.drawPath(path, strokePaint)
+                canvas.drawCircle(cx, cy, 2.3f * u, strokePaint)
             }
 
             IconType.SNOWFLAKE -> {
@@ -489,6 +506,13 @@ class VectorIconView(
                 canvas.drawCircle(cx, cy, 5.6f * u, strokePaint)
                 strokePaint.alpha = Color.alpha(tintColor)
                 canvas.drawCircle(cx, cy, 3.0f * u, fillPaint)
+            }
+
+            IconType.POWER -> {
+                // Power Off / Screen Standby Symbol
+                canvas.drawLine(cx, cy - 8.0f * u, cx, cy - 0.8f * u, strokePaint)
+                rect.set(cx - 6.8f * u, cy - 5.8f * u, cx + 6.8f * u, cy + 7.8f * u)
+                canvas.drawArc(rect, -52f, 284f, false, strokePaint)
             }
         }
     }

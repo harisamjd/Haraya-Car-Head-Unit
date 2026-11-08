@@ -17,10 +17,7 @@ data class ThemeResult(
 /**
  * Resolver untuk menentukan tema aktif berdasarkan Mode, GPS Matahari, dan Histeresis.
  */
-class ThemeResolver(
-    private val minSwitchIntervalMs: Long = 10 * 60 * 1000L // 10 menit histeresis
-) {
-    private var lastSwitchTimeMs: Long = 0L
+class ThemeResolver {
     private var currentDark: Boolean = true
 
     fun resolve(
@@ -33,11 +30,11 @@ class ThemeResolver(
         when (mode) {
             ThemeMode.LIGHT -> {
                 currentDark = false
-                return ThemeResult(isDark = false, reason = "Manual: Terang")
+                return ThemeResult(isDark = false, reason = "Manual: Light Mode")
             }
             ThemeMode.DARK -> {
                 currentDark = true
-                return ThemeResult(isDark = true, reason = "Manual: Gelap")
+                return ThemeResult(isDark = true, reason = "Manual: Dark Mode")
             }
             ThemeMode.AUTO -> {
                 val candidateDark: Boolean
@@ -47,29 +44,23 @@ class ThemeResolver(
                     val sunTimes = SolarCalc.calculate(latitude, longitude, calendar)
                     val isNightTime = SolarCalc.isNight(latitude, longitude, calendar)
                     candidateDark = isNightTime
-                    val sunsetStr = String.format("%02d:%02d", sunTimes.sunsetHour.toInt(), ((sunTimes.sunsetHour % 1.0) * 60).toInt())
-                    val sunriseStr = String.format("%02d:%02d", sunTimes.sunriseHour.toInt(), ((sunTimes.sunriseHour % 1.0) * 60).toInt())
+                    val sunriseTotalMin = ((sunTimes.sunriseHour + 24.0) % 24.0 * 60.0).toInt()
+                    val sunsetTotalMin = ((sunTimes.sunsetHour + 24.0) % 24.0 * 60.0).toInt()
+                    val sunriseStr = String.format("%02d:%02d", (sunriseTotalMin / 60) % 24, sunriseTotalMin % 60)
+                    val sunsetStr = String.format("%02d:%02d", (sunsetTotalMin / 60) % 24, sunsetTotalMin % 60)
                     reasonText = if (isNightTime) {
-                        "Otomatis: Gelap (Sunset $sunsetStr)"
+                        "Auto: Dark (Sunrise $sunriseStr • Sunset $sunsetStr)"
                     } else {
-                        "Otomatis: Terang (Sunrise $sunriseStr)"
+                        "Auto: Light (Sunrise $sunriseStr • Sunset $sunsetStr)"
                     }
                 } else {
-                    // Fallback jam tetap jika belum ada sinyal GPS (18:00 - 06:00)
                     val hour = calendar.get(Calendar.HOUR_OF_DAY)
                     val isNightHour = hour >= 18 || hour < 6
                     candidateDark = isNightHour
-                    reasonText = if (isNightHour) "Otomatis: Gelap (Jadwal malam)" else "Otomatis: Terang (Jadwal siang)"
+                    reasonText = if (isNightHour) "Auto: Dark (18:00 - 06:00)" else "Auto: Light (06:00 - 18:00)"
                 }
 
-                // Cek Histeresis: jangan ubah tema jika baru saja berganti kurang dari 10 menit
-                // (mencegah kedip di terowongan atau kolong jembatan)
-                if (candidateDark != currentDark) {
-                    if (lastSwitchTimeMs == 0L || (currentTimeMs - lastSwitchTimeMs) >= minSwitchIntervalMs) {
-                        currentDark = candidateDark
-                        lastSwitchTimeMs = currentTimeMs
-                    }
-                }
+                currentDark = candidateDark
 
                 return ThemeResult(
                     isDark = currentDark,

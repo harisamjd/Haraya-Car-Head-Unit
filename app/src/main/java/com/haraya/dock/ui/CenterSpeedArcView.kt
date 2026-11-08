@@ -153,12 +153,12 @@ class CenterSpeedArcView(context: Context) : View(context) {
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         if (w > 0 && h > 0) {
-            val radius = min(w * 0.46f, h * 0.52f)
+            val radius = min(w * 0.46f, h * 0.50f)
             val speedStrokeW = (radius * 0.068f).coerceIn(6.5f, 15f)
             val clusterH = radius * 1.55f
-            val extraY = ((h - clusterH) * 0.32f).coerceAtLeast(0f)
+            val extraY = ((h - clusterH) * 0.16f).coerceAtLeast(0f)
             val cx = w.toFloat() / 2f
-            val cy = extraY + radius + speedStrokeW * 1.25f
+            val cy = extraY + radius + speedStrokeW * 1.15f
             val rpmRadius = radius * 0.71f
             onGeometryChanged?.invoke(cx, cy, radius, rpmRadius, extraY)
         }
@@ -173,13 +173,13 @@ class CenterSpeedArcView(context: Context) : View(context) {
         val startAngle = 170f
         val totalSweep = 200f
 
-        val radius = min(w * 0.46f, h * 0.52f)
+        val radius = min(w * 0.46f, h * 0.50f)
         val speedStrokeW = (radius * 0.068f).coerceIn(6.5f, 15f)
         val clusterH = radius * 1.55f
-        val extraY = ((h - clusterH) * 0.32f).coerceAtLeast(0f)
+        val extraY = ((h - clusterH) * 0.16f).coerceAtLeast(0f)
 
         val cx = w / 2f
-        val cy = extraY + radius + speedStrokeW * 1.25f
+        val cy = extraY + radius + speedStrokeW * 1.15f
 
         val zone1Color = if (palette.isDark) 0x382DD4BF else 0x4838BDF8
         val zone2Color = if (palette.isDark) 0x38F59E0B else 0x48FBBF24
@@ -309,7 +309,7 @@ class CenterSpeedArcView(context: Context) : View(context) {
         val rpmColor = when {
             animRpm >= 6000f -> 0xFFEF4444.toInt()
             animRpm >= 4000f -> 0xFFF59E0B.toInt()
-            else -> palette.accent
+            else -> if (palette.isDark) 0xFF2DD4BF.toInt() else 0xFF0284C7.toInt()
         }
         val rpmBlockColor = (rpmColor and 0x00FFFFFF) or 0x7A000000
 

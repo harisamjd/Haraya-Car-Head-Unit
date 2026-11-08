@@ -45,7 +45,8 @@ class CarCockpitView(
     private val onOpenObdScreen: () -> Unit,
     private val onOpenObdSettingsModal: () -> Unit,
     private val onOpenSettingsDialog: () -> Unit,
-    private val onOpenAppsScreen: () -> Unit
+    private val onOpenAppsScreen: () -> Unit,
+    private val onPowerOffScreen: () -> Unit = {}
 ) : LinearLayout(context) {
 
     enum class CockpitStage {
@@ -180,8 +181,12 @@ class CarCockpitView(
     private val weatherTempTv: TextView
     private val weatherDescTv: TextView
 
-    // Bottom Dock Bar (6 Tabs: HOME, MAP, MEDIA, PHONE, OBD & ENGINE, APPS)
+    // Bottom Dock Bar (Power Left + 6 Tabs: HOME, MAP, MEDIA, PHONE, OBD & ENGINE, APPS + Power Right)
     private val bottomDockCard: GlassCardView
+    private val powerLeftBtn: FrameLayout
+    private val powerLeftIcon: VectorIconView
+    private val powerRightBtn: FrameLayout
+    private val powerRightIcon: VectorIconView
     private val dockTabBoxes = mutableListOf<LinearLayout>()
     private val dockTabIcons = mutableListOf<VectorIconView>()
     private val dockTabLabels = mutableListOf<TextView>()
@@ -214,11 +219,11 @@ class CarCockpitView(
         }
 
         layoutSwitchBtn = TextView(context).apply {
-            text = "Classic"
-            textSize = 10f
+            text = "C"
+            textSize = 11f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
             includeFontPadding = false
-            setPadding(dp(10f), dp(5f), dp(10f), dp(5f))
+            gravity = Gravity.CENTER
             setOnClickListener { onSwitchToClassicLayout() }
         }
 
@@ -227,16 +232,16 @@ class CarCockpitView(
             gravity = Gravity.CENTER_VERTICAL
         }
         leftCornerControls.addView(themeCycleBtn, LayoutParams(dp(30f), dp(26f)))
-        leftCornerControls.addView(layoutSwitchBtn, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+        leftCornerControls.addView(layoutSwitchBtn, LayoutParams(dp(30f), dp(26f)).apply {
             leftMargin = dp(5f)
         })
 
         gpsPillTv = TextView(context).apply {
-            text = "● GPS Active"
-            textSize = 9.5f
+            text = "●"
+            textSize = 10.5f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
             includeFontPadding = false
-            setPadding(dp(9f), dp(5f), dp(9f), dp(5f))
+            gravity = Gravity.CENTER
             setOnClickListener { onGpsPillClicked() }
         }
 
@@ -250,7 +255,7 @@ class CarCockpitView(
             orientation = HORIZONTAL
             gravity = Gravity.END or Gravity.CENTER_VERTICAL
         }
-        rightCornerControls.addView(gpsPillTv)
+        rightCornerControls.addView(gpsPillTv, LayoutParams(dp(30f), dp(26f)))
         rightCornerControls.addView(settingsTopBtn, LayoutParams(dp(30f), dp(26f)).apply {
             leftMargin = dp(5f)
         })
@@ -649,16 +654,24 @@ class CarCockpitView(
             }
         )
 
-        speedArcView.onGeometryChanged = { cx, cy, radius, rpmRadius, extraY ->
+        speedArcView.onGeometryChanged = { _, cy, _, rpmRadius, extraY ->
             post {
-                val carH = (rpmRadius * 0.90f).toInt().coerceIn(dp(95f), dp(175f))
-                val carTop = (cy - rpmRadius * 0.12f).toInt()
+                val stageH = centerStageFrame.height
+                val statusH = carBottomStatusBar.height.takeIf { it > 0 } ?: dp(32f)
+                val maxStatusTop = (stageH - statusH - dp(2f)).coerceAtLeast(0)
+
+                val carH = (rpmRadius * 0.80f).toInt().coerceIn(dp(80f), dp(150f))
+                val desiredCarTop = (cy - rpmRadius * 0.30f).toInt()
+                val desiredStatusTop = desiredCarTop + carH + dp(2f)
+
+                val finalStatusTop = if (stageH > 0) desiredStatusTop.coerceAtMost(maxStatusTop) else desiredStatusTop
+                val finalCarTop = (finalStatusTop - carH - dp(2f)).coerceAtLeast((cy - rpmRadius * 0.62f).toInt())
 
                 (carImageView.layoutParams as? FrameLayout.LayoutParams)?.let { lp ->
                     lp.width = ViewGroup.LayoutParams.MATCH_PARENT
                     lp.height = carH
                     lp.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-                    lp.topMargin = carTop
+                    lp.topMargin = finalCarTop
                     lp.leftMargin = dp(24f)
                     lp.rightMargin = dp(24f)
                     lp.bottomMargin = 0
@@ -669,7 +682,7 @@ class CarCockpitView(
                     lp.width = ViewGroup.LayoutParams.MATCH_PARENT
                     lp.height = ViewGroup.LayoutParams.WRAP_CONTENT
                     lp.gravity = Gravity.TOP
-                    lp.topMargin = carTop + carH + dp(6f)
+                    lp.topMargin = finalStatusTop
                     lp.bottomMargin = 0
                     carBottomStatusBar.layoutParams = lp
                 }
@@ -1160,14 +1173,23 @@ class CarCockpitView(
         })
 
         // ==========================================
-        // 3. BOTTOM NAVIGATION DOCK BAR (Settings Tab Removed!)
+        // 3. BOTTOM NAVIGATION DOCK BAR (With Left & Right Screen-Off Power Buttons)
         // ==========================================
         bottomDockCard = GlassCardView(context)
-        bottomDockCard.setPadding(dp(10f), dp(4f), dp(10f), dp(4f))
+        bottomDockCard.setPadding(dp(8f), dp(4f), dp(8f), dp(4f))
         val dockRow = LinearLayout(context).apply {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
+
+        powerLeftIcon = VectorIconView(context, VectorIconView.IconType.POWER)
+        powerLeftBtn = FrameLayout(context).apply {
+            addView(powerLeftIcon, FrameLayout.LayoutParams(dp(14f), dp(14f), Gravity.CENTER))
+            setOnClickListener { onPowerOffScreen() }
+        }
+        dockRow.addView(powerLeftBtn, LayoutParams(dp(34f), dp(26f)).apply {
+            rightMargin = dp(6f)
+        })
 
         val dockSpecs = listOf(
             Triple(VectorIconView.IconType.HOME, "HOME") { onSelectHomeStage() },
@@ -1208,6 +1230,16 @@ class CarCockpitView(
                 if (i < dockSpecs.lastIndex) rightMargin = dp(4f)
             })
         }
+
+        powerRightIcon = VectorIconView(context, VectorIconView.IconType.POWER)
+        powerRightBtn = FrameLayout(context).apply {
+            addView(powerRightIcon, FrameLayout.LayoutParams(dp(14f), dp(14f), Gravity.CENTER))
+            setOnClickListener { onPowerOffScreen() }
+        }
+        dockRow.addView(powerRightBtn, LayoutParams(dp(34f), dp(26f)).apply {
+            leftMargin = dp(6f)
+        })
+
         bottomDockCard.addView(dockRow, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         addView(bottomDockCard, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
     }
@@ -1244,12 +1276,11 @@ class CarCockpitView(
     }
 
     private fun styleGpsPill() {
+        gpsPillTv.text = "●"
         if (isGpsActive) {
-            gpsPillTv.text = "● GPS Active"
             gpsPillTv.background = GlassTheme.innerDrawable(context, palette, 8f)
             gpsPillTv.setTextColor(if (palette.isDark) 0xFF34D399.toInt() else 0xFF059669.toInt())
         } else {
-            gpsPillTv.text = "○ GPS Off"
             val offBg = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = dp(8f).toFloat()
@@ -1257,8 +1288,9 @@ class CarCockpitView(
                 setStroke(dp(1f), 0xFFEF4444.toInt())
             }
             gpsPillTv.background = offBg
-            gpsPillTv.setTextColor(if (palette.isDark) 0xFFFCA5A5.toInt() else 0xFFB91C1C.toInt())
+            gpsPillTv.setTextColor(0xFFEF4444.toInt())
         }
+        GlassTheme.makePressable(context, gpsPillTv, palette, 8f)
     }
 
     fun updateClockAndPrayer(clockStr: String, prayers: PrayerCalc.PrayerTimes) {
@@ -2510,6 +2542,15 @@ class CarCockpitView(
 
         // Bottom Dock
         bottomDockCard.applyTheme(palette)
+        val powerTint = if (palette.isDark) 0xFFF87171.toInt() else 0xFFDC2626.toInt()
+        powerLeftBtn.background = GlassTheme.innerDrawable(context, palette, 8f)
+        powerLeftIcon.setTint(powerTint)
+        GlassTheme.makePressable(context, powerLeftBtn, palette, 8f)
+
+        powerRightBtn.background = GlassTheme.innerDrawable(context, palette, 8f)
+        powerRightIcon.setTint(powerTint)
+        GlassTheme.makePressable(context, powerRightBtn, palette, 8f)
+
         styleDockTabs()
 
         refreshTripAndServices()

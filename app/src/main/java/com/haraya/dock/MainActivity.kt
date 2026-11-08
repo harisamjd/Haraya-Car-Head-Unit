@@ -10,6 +10,7 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
@@ -28,6 +29,7 @@ import android.text.TextUtils
 import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
+import android.view.WindowManager
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.widget.*
@@ -126,6 +128,7 @@ class MainActivity : Activity(), LocationListener {
     private lateinit var homeCockpitLayout: LinearLayout
     private lateinit var obdDashboardLayout: LinearLayout
     private lateinit var appsDrawerLayout: GlassCardView
+    private lateinit var screenOffOverlay: FrameLayout
 
     // === CLASSIC HOME COMPONENTS ===
     private lateinit var clockSpeedCard: GlassCardView
@@ -262,6 +265,10 @@ class MainActivity : Activity(), LocationListener {
                 prefs.edit().putString("theme_mode", themeMode.name).apply()
                 themeSidebarItem.setLabel(themeModeLabel())
                 refreshAll()
+                if (targetMode == ThemeMode.AUTO) {
+                    val res = themeResolver.resolve(themeMode, currentLat, currentLon)
+                    Toast.makeText(this, res.reason, Toast.LENGTH_SHORT).show()
+                }
             },
             onSwitchToClassicLayout = {
                 setHomeStyle(HomeStyle.CLASSIC_SILK)
@@ -315,6 +322,9 @@ class MainActivity : Activity(), LocationListener {
             },
             onOpenAppsScreen = {
                 setScreen(AppScreen.APPS)
+            },
+            onPowerOffScreen = {
+                activateScreenBlackout()
             }
         )
         carCockpitView.updateWeather(weatherFetcher.getCachedWeather())
@@ -366,6 +376,25 @@ class MainActivity : Activity(), LocationListener {
             carCockpitView,
             FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         )
+
+        screenOffOverlay = FrameLayout(this).apply {
+            setBackgroundColor(Color.BLACK)
+            visibility = View.GONE
+            isClickable = true
+            isFocusable = true
+            elevation = dp(100f).toFloat()
+            setOnTouchListener { _, event ->
+                if (event.action == android.view.MotionEvent.ACTION_DOWN) {
+                    wakeUpScreenFromBlackout()
+                }
+                true
+            }
+        }
+        rootFrame.addView(
+            screenOffOverlay,
+            FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        )
+
         setContentView(rootFrame)
 
         setScreen(AppScreen.HOME)
@@ -451,9 +480,44 @@ class MainActivity : Activity(), LocationListener {
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
+        if (screenOffOverlay.visibility == View.VISIBLE) {
+            wakeUpScreenFromBlackout()
+            return
+        }
         if (currentScreen != AppScreen.HOME) {
             setScreen(AppScreen.HOME)
         }
+    }
+
+    private fun activateScreenBlackout() {
+        screenOffOverlay.animate().cancel()
+        screenOffOverlay.alpha = 0f
+        screenOffOverlay.visibility = View.VISIBLE
+        screenOffOverlay.bringToFront()
+        screenOffOverlay.animate()
+            .alpha(1f)
+            .setDuration(220L)
+            .start()
+
+        val lp = window.attributes
+        lp.screenBrightness = 0.005f
+        window.attributes = lp
+    }
+
+    private fun wakeUpScreenFromBlackout() {
+        if (screenOffOverlay.visibility != View.VISIBLE) return
+        val lp = window.attributes
+        lp.screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+        window.attributes = lp
+
+        screenOffOverlay.animate().cancel()
+        screenOffOverlay.animate()
+            .alpha(0f)
+            .setDuration(160L)
+            .withEndAction {
+                screenOffOverlay.visibility = View.GONE
+            }
+            .start()
     }
 
     private fun setHomeStyle(style: HomeStyle) {
