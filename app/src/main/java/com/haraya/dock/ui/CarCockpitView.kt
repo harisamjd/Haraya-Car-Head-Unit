@@ -2,7 +2,10 @@ package com.haraya.dock.ui
 
 import android.content.Context
 import android.content.Intent
+import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.media.AudioManager
 import android.os.SystemClock
@@ -14,6 +17,7 @@ import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
+import android.widget.PopupWindow
 import com.haraya.dock.R
 import com.haraya.dock.calc.PrayerCalc
 import com.haraya.dock.data.*
@@ -699,7 +703,7 @@ class CarCockpitView(
                 if (!NotificationCollectorService.isNotificationAccessGranted(context)) {
                     promptNotificationListenerAccess()
                 } else {
-                    showMediaChooserDialog()
+                    showMediaContextMenu(mediaCard)
                 }
             }
         }
@@ -726,9 +730,9 @@ class CarCockpitView(
             rightMargin = dp(8f)
         })
 
-        fun buildMediaCircleBtn(iconType: VectorIconView.IconType, boxDp: Float, iconDp: Float, onClick: () -> Unit): Pair<FrameLayout, VectorIconView> {
+        fun buildMediaCircleBtn(iconType: VectorIconView.IconType, boxDp: Float, iconDp: Float, onClick: (View) -> Unit): Pair<FrameLayout, VectorIconView> {
             val box = FrameLayout(context).apply {
-                setOnClickListener { onClick() }
+                setOnClickListener { onClick(this) }
             }
             val ic = VectorIconView(context, iconType)
             box.addView(ic, FrameLayout.LayoutParams(dp(iconDp), dp(iconDp), Gravity.CENTER))
@@ -738,7 +742,9 @@ class CarCockpitView(
             return box to ic
         }
 
-        val ytPair = buildMediaCircleBtn(VectorIconView.IconType.YOUTUBE, 32f, 15f) { onOpenYouTube() }
+        val ytPair = buildMediaCircleBtn(VectorIconView.IconType.YOUTUBE, 32f, 15f) { btn ->
+            showMediaContextMenu(btn)
+        }
         val prevPair = buildMediaCircleBtn(VectorIconView.IconType.PREV_TRACK, 32f, 14f) {
             sendMediaButton(KeyEvent.KEYCODE_MEDIA_PREVIOUS)
         }
@@ -1166,7 +1172,10 @@ class CarCockpitView(
         val dockSpecs = listOf(
             Triple(VectorIconView.IconType.HOME, "HOME") { onSelectHomeStage() },
             Triple(VectorIconView.IconType.MAPS, "MAP") { onOpenExternalMaps() },
-            Triple(VectorIconView.IconType.MUSIC, "MEDIA") { showMediaChooserDialog() },
+            Triple(VectorIconView.IconType.MUSIC, "MEDIA") {
+                val anchor = dockTabBoxes.getOrNull(2) ?: bottomDockCard
+                showMediaContextMenu(anchor)
+            },
             Triple(VectorIconView.IconType.PHONE, "PHONE") { onOpenPhone() },
             Triple(VectorIconView.IconType.GAUGE, "OBD & ENGINE") { onOpenObdScreen() },
             Triple(VectorIconView.IconType.APPS_GRID, "APPS") { onOpenAppsScreen() }
@@ -1596,44 +1605,465 @@ class CarCockpitView(
         }, 720L)
     }
 
-    private fun showMediaChooserDialog() {
-        HarayaDialog.showCustomModal(
-            context = context,
-            palette = palette,
-            title = "Open Media Player",
-            subtitle = "Choose your preferred music or video streaming application",
-            contentBuilder = { container, dlg ->
-                val ytMusicRow = HarayaDialog.buildOptionRow(
-                    context = context,
-                    palette = palette,
-                    title = "YouTube Music",
-                    subtitle = "Stream music playlists, albums, and background audio",
-                    badgeText = "Open Music",
-                    badgePositive = true
-                ) {
-                    dlg.dismiss()
-                    onOpenMusic()
-                }
-                val ytVideoRow = HarayaDialog.buildOptionRow(
-                    context = context,
-                    palette = palette,
-                    title = "YouTube",
-                    subtitle = "Watch videos, livestreams, and podcasts",
-                    badgeText = "Open Video",
-                    badgePositive = false
-                ) {
-                    dlg.dismiss()
-                    onOpenYouTube()
-                }
-                container.addView(ytMusicRow, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                    bottomMargin = dp(6f)
-                })
-                container.addView(ytVideoRow, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-            },
-            actions = listOf(
-                HarayaDialog.ActionButton("Cancel", isPrimary = false) { it.dismiss() }
-            )
+    data class DetectedMediaApp(
+        val label: String,
+        val packageName: String,
+        val icon: Drawable? = null
+    )
+
+    private var activeMediaPopup: PopupWindow? = null
+
+    private fun getInstalledMusicApps(): List<DetectedMediaApp> {
+        val pm = context.packageManager
+        val result = LinkedHashMap<String, DetectedMediaApp>()
+
+        val knownMusic = listOf(
+            "com.spotify.music" to "Spotify",
+            "com.spotify.lite" to "Spotify Lite",
+            "app.revanced.android.apps.youtube.music" to "YouTube Music",
+            "com.google.android.apps.youtube.music" to "YouTube Music",
+            "com.apple.android.music" to "Apple Music",
+            "deezer.android.app" to "Deezer",
+            "com.aspiro.tidal" to "Tidal",
+            "com.soundcloud.android" to "SoundCloud",
+            "com.sec.android.app.music" to "Samsung Music",
+            "in.krosbits.musicolet" to "Musicolet",
+            "code.name.monkey.retromusic" to "Retro Music",
+            "com.maxmpz.audioplayer" to "Poweramp",
+            "com.tencent.ibg.joox" to "JOOX",
+            "com.aimp.player" to "AIMP",
+            "com.android.music" to "Music"
         )
+        for ((pkg, defaultName) in knownMusic) {
+            try {
+                val appInfo = pm.getApplicationInfo(pkg, 0)
+                if (appInfo.enabled) {
+                    val lbl = pm.getApplicationLabel(appInfo).toString().ifBlank { defaultName }
+                    val icon = pm.getApplicationIcon(appInfo)
+                    result[pkg] = DetectedMediaApp(lbl, pkg, icon)
+                }
+            } catch (_: Exception) {}
+        }
+
+        try {
+            val musicIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_APP_MUSIC)
+            val matches = pm.queryIntentActivities(musicIntent, 0)
+            for (m in matches) {
+                val pkg = m.activityInfo.packageName
+                if (!result.containsKey(pkg) && pkg != context.packageName) {
+                    val lbl = m.loadLabel(pm).toString()
+                    val icon = m.loadIcon(pm)
+                    result[pkg] = DetectedMediaApp(lbl, pkg, icon)
+                }
+            }
+        } catch (_: Exception) {}
+
+        return result.values.toList()
+    }
+
+    private fun getInstalledVideoApps(): List<DetectedMediaApp> {
+        val pm = context.packageManager
+        val result = LinkedHashMap<String, DetectedMediaApp>()
+
+        val knownVideo = listOf(
+            "app.revanced.android.youtube" to "YouTube",
+            "com.google.android.youtube" to "YouTube",
+            "com.vidio.android" to "Vidio",
+            "com.amazon.avod.thirdpartyclient" to "Prime Video",
+            "com.netflix.mediaclient" to "Netflix",
+            "in.startv.hotstar" to "Disney+ Hotstar",
+            "com.disney.disneyplus" to "Disney+",
+            "com.vuclip.viu" to "Viu",
+            "com.hbo.gobro" to "HBO GO",
+            "com.hbo.hbonow" to "Max",
+            "com.wbd.stream" to "Max",
+            "com.tencent.qqlivei18n" to "WeTV",
+            "com.iqiyi.i18n" to "iQIYI",
+            "org.videolan.vlc" to "VLC",
+            "com.mxtech.videoplayer.ad" to "MX Player",
+            "com.mxtech.videoplayer.pro" to "MX Player Pro",
+            "com.bstar.bilibili" to "Bstation",
+            "tv.twitch.android.app" to "Twitch"
+        )
+        for ((pkg, defaultName) in knownVideo) {
+            try {
+                val appInfo = pm.getApplicationInfo(pkg, 0)
+                if (appInfo.enabled) {
+                    val lbl = pm.getApplicationLabel(appInfo).toString().ifBlank { defaultName }
+                    val icon = pm.getApplicationIcon(appInfo)
+                    result[pkg] = DetectedMediaApp(lbl, pkg, icon)
+                }
+            } catch (_: Exception) {}
+        }
+
+        try {
+            val videoIntent = Intent(Intent.ACTION_MAIN).addCategory("android.intent.category.APP_VIDEO")
+            val matches = pm.queryIntentActivities(videoIntent, 0)
+            for (m in matches) {
+                val pkg = m.activityInfo.packageName
+                if (!result.containsKey(pkg) && pkg != context.packageName) {
+                    val lbl = m.loadLabel(pm).toString()
+                    val icon = m.loadIcon(pm)
+                    result[pkg] = DetectedMediaApp(lbl, pkg, icon)
+                }
+            }
+        } catch (_: Exception) {}
+
+        return result.values.toList()
+    }
+
+    private fun launchMediaPackage(pkg: String, fallbackLabel: String) {
+        try {
+            val intent = context.packageManager.getLaunchIntentForPackage(pkg)
+            if (intent != null) {
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(intent)
+                return
+            }
+        } catch (_: Exception) {}
+        Toast.makeText(context, "$fallbackLabel is not available", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun showMediaContextMenu(anchor: View) {
+        if (activeMediaPopup?.isShowing == true) {
+            activeMediaPopup?.dismiss()
+            activeMediaPopup = null
+            return
+        }
+
+        val musicApps = getInstalledMusicApps()
+        val videoApps = getInstalledVideoApps()
+
+        val popupWidth = dp(234f)
+        val cardPadding = dp(6f)
+
+        val primaryTextColor = if (palette.isDark) 0xFFF8FAFC.toInt() else 0xFF0F172A.toInt()
+        val secondaryTextColor = if (palette.isDark) 0xFF94A3B8.toInt() else 0xFF64748B.toInt()
+        val dividerColor = if (palette.isDark) 0x22FFFFFF else 0x1A000000
+
+        val rootCard = LinearLayout(context).apply {
+            orientation = VERTICAL
+            isClickable = true
+            isFocusable = true
+            setPadding(cardPadding, cardPadding, cardPadding, cardPadding)
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp(16f).toFloat()
+                setColor(if (palette.isDark) 0xFF181C24.toInt() else 0xFFFFFFFF.toInt())
+                setStroke(dp(1.2f), if (palette.isDark) 0x44FFFFFF.toInt() else 0x26000000.toInt())
+            }
+            elevation = dp(16f).toFloat()
+        }
+        GlassTheme.clipRound(context, rootCard, 16f)
+
+        val popup = PopupWindow(
+            rootCard,
+            popupWidth,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            true
+        ).apply {
+            isOutsideTouchable = true
+            isTouchable = true
+            setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            elevation = dp(20f).toFloat()
+            animationStyle = android.R.style.Animation_Dialog
+            setOnDismissListener {
+                activeMediaPopup = null
+            }
+        }
+        activeMediaPopup = popup
+
+        val location = IntArray(2)
+        anchor.getLocationOnScreen(location)
+        val anchorX = location[0]
+        val anchorY = location[1]
+
+        val screenW = resources.displayMetrics.widthPixels
+        var posX = anchorX + (anchor.width - popupWidth) / 2
+        posX = posX.coerceIn(dp(10f), screenW - popupWidth - dp(10f))
+
+        fun updateLayoutAndPosition() {
+            rootCard.measure(
+                View.MeasureSpec.makeMeasureSpec(popupWidth, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+            )
+            val measuredH = rootCard.measuredHeight
+            var posY = anchorY - measuredH - dp(8f)
+            if (posY < dp(36f)) {
+                posY = anchorY + anchor.height + dp(8f)
+            }
+            if (popup.isShowing) {
+                popup.update(posX, posY, popupWidth, ViewGroup.LayoutParams.WRAP_CONTENT)
+            } else {
+                popup.showAtLocation(anchor, Gravity.NO_GRAVITY, posX, posY)
+            }
+        }
+
+        var renderMainMenuAction: (() -> Unit)? = null
+
+        fun showSubMenu(categoryTitle: String, apps: List<DetectedMediaApp>, fallbackAction: () -> Unit) {
+            rootCard.removeAllViews()
+
+            // Header with Back button
+            val headerRow = LinearLayout(context).apply {
+                orientation = HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(8f), dp(6f), dp(8f), dp(6f))
+            }
+
+            val backBtn = TextView(context).apply {
+                text = "‹ Back"
+                textSize = 12.5f
+                typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+                setTextColor(palette.accent)
+                setPadding(dp(4f), dp(2f), dp(8f), dp(2f))
+                setOnClickListener {
+                    renderMainMenuAction?.invoke()
+                }
+            }
+            GlassTheme.makePressable(context, backBtn, palette, 8f)
+
+            val catTitleTv = TextView(context).apply {
+                text = categoryTitle
+                textSize = 12f
+                typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+                setTextColor(primaryTextColor)
+                gravity = Gravity.END
+            }
+
+            headerRow.addView(backBtn, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            headerRow.addView(View(context), LayoutParams(0, 1, 1f))
+            headerRow.addView(catTitleTv, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            rootCard.addView(headerRow)
+
+            // Divider
+            rootCard.addView(View(context).apply {
+                setBackgroundColor(dividerColor)
+            }, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(0.8f)).apply {
+                topMargin = dp(2f)
+                bottomMargin = dp(4f)
+            })
+
+            if (apps.isEmpty()) {
+                val emptyTv = TextView(context).apply {
+                    text = "No apps detected. Tap to open store."
+                    textSize = 11f
+                    setTextColor(secondaryTextColor)
+                    setPadding(dp(12f), dp(10f), dp(12f), dp(10f))
+                    setOnClickListener {
+                        popup.dismiss()
+                        fallbackAction()
+                    }
+                }
+                GlassTheme.makePressable(context, emptyTv, palette, 10f)
+                rootCard.addView(emptyTv)
+            } else {
+                for (i in apps.indices) {
+                    val app = apps[i]
+                    val itemRow = LinearLayout(context).apply {
+                        orientation = HORIZONTAL
+                        gravity = Gravity.CENTER_VERTICAL
+                        setPadding(dp(10f), dp(8f), dp(10f), dp(8f))
+                        setOnClickListener {
+                            popup.dismiss()
+                            launchMediaPackage(app.packageName, app.label)
+                        }
+                    }
+                    GlassTheme.makePressable(context, itemRow, palette, 10f)
+
+                    val iconIv = ImageView(context).apply {
+                        scaleType = ImageView.ScaleType.FIT_CENTER
+                        if (app.icon != null) {
+                            setImageDrawable(app.icon)
+                        }
+                    }
+                    val labelTv = TextView(context).apply {
+                        text = app.label
+                        textSize = 13f
+                        typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+                        setTextColor(primaryTextColor)
+                        maxLines = 1
+                        ellipsize = TextUtils.TruncateAt.END
+                    }
+                    val arrowTv = TextView(context).apply {
+                        text = "↗"
+                        textSize = 13f
+                        setTextColor(secondaryTextColor)
+                    }
+
+                    itemRow.addView(iconIv, LayoutParams(dp(26f), dp(26f)))
+                    itemRow.addView(labelTv, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                        leftMargin = dp(10f)
+                        rightMargin = dp(6f)
+                    })
+                    itemRow.addView(arrowTv)
+
+                    rootCard.addView(itemRow)
+
+                    if (i < apps.size - 1) {
+                        rootCard.addView(View(context).apply {
+                            setBackgroundColor(dividerColor)
+                        }, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(0.6f)).apply {
+                            leftMargin = dp(38f)
+                            rightMargin = dp(10f)
+                        })
+                    }
+                }
+            }
+
+            updateLayoutAndPosition()
+        }
+
+        fun renderMainMenu() {
+            rootCard.removeAllViews()
+
+            // 1. MUSIC OPTION
+            val musicRow = LinearLayout(context).apply {
+                orientation = HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(10f), dp(8f), dp(10f), dp(8f))
+                setOnClickListener {
+                    if (musicApps.size == 1) {
+                        popup.dismiss()
+                        launchMediaPackage(musicApps[0].packageName, musicApps[0].label)
+                    } else {
+                        showSubMenu("Music", musicApps, onOpenMusic)
+                    }
+                }
+            }
+            GlassTheme.makePressable(context, musicRow, palette, 10f)
+
+            val musicIconBadge = FrameLayout(context).apply {
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    cornerRadius = dp(8f).toFloat()
+                    setColor(0x2610B981)
+                }
+                addView(
+                    VectorIconView(context, VectorIconView.IconType.MUSIC, 0xFF10B981.toInt()),
+                    FrameLayout.LayoutParams(dp(18f), dp(18f), Gravity.CENTER)
+                )
+            }
+
+            val musicTextCol = LinearLayout(context).apply {
+                orientation = VERTICAL
+                val title = TextView(context).apply {
+                    text = "Music"
+                    textSize = 13.5f
+                    typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+                    setTextColor(primaryTextColor)
+                }
+                val sub = TextView(context).apply {
+                    text = if (musicApps.isNotEmpty()) {
+                        musicApps.take(2).joinToString(", ") { it.label }
+                    } else {
+                        "Open Music Player"
+                    }
+                    textSize = 10.5f
+                    setTextColor(secondaryTextColor)
+                    maxLines = 1
+                    ellipsize = TextUtils.TruncateAt.END
+                }
+                addView(title)
+                addView(sub)
+            }
+
+            val musicAccessory = TextView(context).apply {
+                text = if (musicApps.size > 1) "›" else "↗"
+                textSize = if (musicApps.size > 1) 16f else 13f
+                typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+                setTextColor(secondaryTextColor)
+            }
+
+            musicRow.addView(musicIconBadge, LayoutParams(dp(32f), dp(32f)))
+            musicRow.addView(musicTextCol, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                leftMargin = dp(10f)
+                rightMargin = dp(6f)
+            })
+            musicRow.addView(musicAccessory)
+            rootCard.addView(musicRow)
+
+            // Divider between Music and Video
+            rootCard.addView(View(context).apply {
+                setBackgroundColor(dividerColor)
+            }, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(0.8f)).apply {
+                leftMargin = dp(8f)
+                rightMargin = dp(8f)
+                topMargin = dp(2f)
+                bottomMargin = dp(2f)
+            })
+
+            // 2. VIDEO OPTION
+            val videoRow = LinearLayout(context).apply {
+                orientation = HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(10f), dp(8f), dp(10f), dp(8f))
+                setOnClickListener {
+                    if (videoApps.size == 1) {
+                        popup.dismiss()
+                        launchMediaPackage(videoApps[0].packageName, videoApps[0].label)
+                    } else {
+                        showSubMenu("Video", videoApps, onOpenYouTube)
+                    }
+                }
+            }
+            GlassTheme.makePressable(context, videoRow, palette, 10f)
+
+            val videoIconBadge = FrameLayout(context).apply {
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    cornerRadius = dp(8f).toFloat()
+                    setColor(0x26F59E0B)
+                }
+                addView(
+                    VectorIconView(context, VectorIconView.IconType.YOUTUBE, 0xFFF59E0B.toInt()),
+                    FrameLayout.LayoutParams(dp(18f), dp(18f), Gravity.CENTER)
+                )
+            }
+
+            val videoTextCol = LinearLayout(context).apply {
+                orientation = VERTICAL
+                val title = TextView(context).apply {
+                    text = "Video"
+                    textSize = 13.5f
+                    typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+                    setTextColor(primaryTextColor)
+                }
+                val sub = TextView(context).apply {
+                    text = if (videoApps.isNotEmpty()) {
+                        videoApps.take(2).joinToString(", ") { it.label }
+                    } else {
+                        "Open Video Player"
+                    }
+                    textSize = 10.5f
+                    setTextColor(secondaryTextColor)
+                    maxLines = 1
+                    ellipsize = TextUtils.TruncateAt.END
+                }
+                addView(title)
+                addView(sub)
+            }
+
+            val videoAccessory = TextView(context).apply {
+                text = if (videoApps.size > 1) "›" else "↗"
+                textSize = if (videoApps.size > 1) 16f else 13f
+                typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+                setTextColor(secondaryTextColor)
+            }
+
+            videoRow.addView(videoIconBadge, LayoutParams(dp(32f), dp(32f)))
+            videoRow.addView(videoTextCol, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                leftMargin = dp(10f)
+                rightMargin = dp(6f)
+            })
+            videoRow.addView(videoAccessory)
+            rootCard.addView(videoRow)
+
+            updateLayoutAndPosition()
+        }
+
+        renderMainMenuAction = { renderMainMenu() }
+        renderMainMenu()
     }
 
     private fun showAdhanPreviewDialog() {

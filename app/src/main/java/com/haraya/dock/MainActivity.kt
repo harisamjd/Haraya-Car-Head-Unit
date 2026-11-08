@@ -211,6 +211,12 @@ class MainActivity : Activity(), LocationListener {
         }
     }
 
+    private val packageChangeReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            loadInstalledAppsAsync()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -375,6 +381,14 @@ class MainActivity : Activity(), LocationListener {
             carCockpitView.playOpeningIntroAnimation()
         }
         requestLocationPermissionIfNeeded()
+        val packageFilter = IntentFilter().apply {
+            addAction(Intent.ACTION_PACKAGE_ADDED)
+            addAction(Intent.ACTION_PACKAGE_REMOVED)
+            addAction(Intent.ACTION_PACKAGE_REPLACED)
+            addAction(Intent.ACTION_PACKAGE_CHANGED)
+            addDataScheme("package")
+        }
+        registerReceiver(packageChangeReceiver, packageFilter)
         loadInstalledAppsAsync()
         weatherFetcher.fetchIfNeeded(currentLat, currentLon) { weather ->
             runOnUiThread {
@@ -410,6 +424,7 @@ class MainActivity : Activity(), LocationListener {
             addAction(LocationManager.PROVIDERS_CHANGED_ACTION)
         })
         updateLauncherStatus()
+        loadInstalledAppsAsync()
         refreshAll()
     }
 
@@ -425,6 +440,10 @@ class MainActivity : Activity(), LocationListener {
     }
 
     override fun onDestroy() {
+        try {
+            unregisterReceiver(packageChangeReceiver)
+        } catch (_: Exception) {
+        }
         adhanPlayerManager.stopAdhanPlayback(notify = false)
         obdConnectionManager.disconnect()
         super.onDestroy()
@@ -485,7 +504,7 @@ class MainActivity : Activity(), LocationListener {
             appsDrawerLayout.visibility = if (screen == AppScreen.APPS) View.VISIBLE else View.GONE
         }
 
-        if (screen == AppScreen.APPS && allApps.isEmpty()) {
+        if (screen == AppScreen.APPS) {
             loadInstalledAppsAsync()
         }
         updateSidebarSelection()
