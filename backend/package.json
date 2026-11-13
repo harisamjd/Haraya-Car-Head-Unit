@@ -1,0 +1,26 @@
+{
+  "name": "haraya-dock-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cloudflare Worker backend for Haraya Dock offline licensing, checkout, and admin utilities",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "keygen": "node scripts/generate-keys.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.46.1",
+    "hono": "^4.6.10"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241106.0",
+    "@types/pg": "^8.23.1",
+    "pg": "^8.23.1",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4",
+    "wrangler": "^3.88.0"
+  }
+}

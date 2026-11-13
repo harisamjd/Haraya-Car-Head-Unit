@@ -1,0 +1,27 @@
+# Cloudflare Workers & Wrangler
+.wrangler/
+.dev.vars
+.dev.vars.*
+
+# Environment configuration
+.env
+.env.*
+
+# Node dependencies
+node_modules/
+
+# Build artifacts
+dist/
+
+# Test coverage
+coverage/
+
+# Cryptographic keys and private certificates
+*.pem
+*.key
+private_key.*
+
+# Operating system files
+.DS_Store
+Thumbs.db
+
